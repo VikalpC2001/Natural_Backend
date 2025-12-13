@@ -200,8 +200,7 @@ const authUser = async (req, res) => {
                             rights: userData.userRights,
                             userName: userData.userFirstName + " " + userData.userLastName,
                             firstName: userData.userFirstName,
-                            // branchId: userData.branchId
-                            branchId: "branchId_1704373871685"
+                            branchId: userData.branchId
                         };
                         res.json({
                             userId: userData.userId,
@@ -221,7 +220,6 @@ const authUser = async (req, res) => {
         res.status(500).send("Internal Server Error");
     }
 };
-
 
 // Rights DDL API
 
