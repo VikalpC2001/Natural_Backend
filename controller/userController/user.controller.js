@@ -179,12 +179,10 @@ const authUser = async (req, res) => {
             userName: req.body.userName,
             Password: req.body.Password
         };
-
         const sql_querry_getUserDetails = `SELECT userId, userRights, userFirstName, userLastName, userName, password, user_details.branchId AS branchId, branch_data.branchName AS branchName, userCreationDate
                                            FROM user_details
                                            LEFT JOIN branch_data ON branch_data.branchId = user_details.branchId
                                            WHERE userName = ?`;
-
         pool.query(sql_querry_getUserDetails, [user.userName], (err, data) => {
             if (err) {
                 console.error("SQL Error:", err);
@@ -194,39 +192,26 @@ const authUser = async (req, res) => {
                     res.status(400).send("Invalid Username or Password");
                 } else {
                     const userData = data[0];
-
                     if (userData.password !== user.Password) {
                         res.status(400).send("Invalid Username or Password");
                     } else {
-                        const creationDate = new Date(userData.userCreationDate);
-                        const currentDate = new Date();
-                        const diffInDays = Math.floor((currentDate - creationDate) / (1000 * 60 * 60 * 24));
-
-                        const isAdmin = userData.userRights === 1; // change if your admin flag is different
-
-                        if (diffInDays > 60 && !isAdmin) {
-                            res.status(403).send("Trial expired. Please contact support.");
-                        } else {
-                            const tokenPayload = {
-                                id: userData.userId,
-                                rights: userData.userRights,
-                                userName: userData.userFirstName + " " + userData.userLastName,
-                                firstName: userData.userFirstName,
-                                // branchId: userData.branchId
-                                branchId: "branchId_1704373871685"
-                            };
-
-                            res.json({
-                                userId: userData.userId,
-                                userRights: userData.userRights,
-                                userName: userData.userFirstName + " " + userData.userLastName,
-                                branchId: userData.branchId,
-                                branchName: userData.branchName,
-                                token: generateToken(tokenPayload)
-                            });
-
-                            console.log("Login successful:", tokenPayload, new Date().toLocaleString());
-                        }
+                        const tokenPayload = {
+                            id: userData.userId,
+                            rights: userData.userRights,
+                            userName: userData.userFirstName + " " + userData.userLastName,
+                            firstName: userData.userFirstName,
+                            // branchId: userData.branchId
+                            branchId: "branchId_1704373871685"
+                        };
+                        res.json({
+                            userId: userData.userId,
+                            userRights: userData.userRights,
+                            userName: userData.userFirstName + " " + userData.userLastName,
+                            branchId: userData.branchId,
+                            branchName: userData.branchName,
+                            token: generateToken(tokenPayload)
+                        });
+                        console.log("Login successful:", tokenPayload, new Date().toLocaleString());
                     }
                 }
             }
