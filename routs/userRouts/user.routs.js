@@ -20,8 +20,6 @@ router.post('/updateUserDetailsByBranchOwner', protect, userController.updateUse
 router.get('/fillUserDetails', protect, userController.fillUserDetails);
 router.post('/chkPassword', protect, userController.chkPassword);
 
-// Unit Routs
-
 const unitController = require("../../controller/userController/unit.controller.js");
 
 router.get('/getUnit', protect, unitController.getUnit);

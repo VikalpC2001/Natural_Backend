@@ -139,6 +139,7 @@ const ddlSubCategory = (req, res) => {
             sql_querry_getddlCategory = `SELECT 
                                             subCategoryId, 
                                             subCategoryName,
+                                            displayRank,
                                             (
                                                 SELECT COUNT(*)
                                                 FROM item_menuList_data imd
@@ -420,6 +421,34 @@ const updateSubCategoryPeriod = (req, res) => {
     })
 }
 
+// Update Display Rank for Sub Category Data
+
+const updateDisplayRankForSubCategory = (req, res) => {
+    try {
+        const jsonData = req.body ? req.body : [];
+        if (jsonData && jsonData.length) {
+            const sql_query_updateRank = `UPDATE item_subCategory_data
+                                          SET displayRank = CASE subCategoryId
+                                          ${jsonData.map(item => `WHEN '${item.subCategoryId}' THEN ${item.displayRank}`).join('\n')}
+                                          END
+                                          WHERE subCategoryId IN (${jsonData.map(item => `'${item.subCategoryId}'`).join(', ')})`;
+            pool.query(sql_query_updateRank, (err, data) => {
+                if (err) {
+                    console.error("An error occurred in SQL Queery", err);
+                    return res.status(500).send('Database Error');
+                } else {
+                    return res.status(200).send("Success");
+                }
+            })
+        } else {
+            return res.status(400).send('Please Fill All The Fields...!')
+        }
+    } catch (error) {
+        console.error('An error occurred', error);
+        res.status(500).send('Internal Server Error');
+    }
+}
+
 module.exports = {
     getSubCategoryList,
     ddlSubCategory,
@@ -428,5 +457,6 @@ module.exports = {
     updateSubCategoryData,
     addSubCategoryPeriod,
     updateSubCategoryPeriod,
-    getSubCategoryListForMobile
+    getSubCategoryListForMobile,
+    updateDisplayRankForSubCategory
 }

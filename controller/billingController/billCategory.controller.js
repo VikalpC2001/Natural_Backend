@@ -66,7 +66,6 @@ const updateBillCategoryData = (req, res) => {
 
             const data = {
                 bwcId: req.body.bwcId ? req.body.bwcId : null,
-                categoryId: req.body.categoryId ? req.body.categoryId : null,
                 menuId: req.body.menuId ? req.body.menuId : null,
                 firmId: req.body.firmId ? req.body.firmId : null,
                 isOfficial: req.body.isOfficial ? req.body.isOfficial : false,
@@ -74,7 +73,7 @@ const updateBillCategoryData = (req, res) => {
                 appriciateLine: req.body.appriciateLine ? req.body.appriciateLine : null,
                 categoryStatus: req.body.categoryStatus ? req.body.categoryStatus : 0,
             }
-            if (!data.categoryId || !data.menuId || !data.firmId) {
+            if (!data.bwcId || !data.menuId || !data.firmId) {
                 return res.status(404).send("Pleasr Provide All Fields...!")
             } else {
                 let sql_query_updateData = `UPDATE
@@ -82,10 +81,10 @@ const updateBillCategoryData = (req, res) => {
                                             SET
                                                 menuId = '${data.menuId}',
                                                 firmId = '${data.firmId}',
-                                                isOfficial = '${data.isOfficial}',
+                                                isOfficial = ${data.isOfficial},
                                                 billFooterNote = '${data.billFooterNote}',
                                                 appriciateLine = '${data.appriciateLine}',
-                                                categoryStatus = '${data.categoryStatus}'
+                                                categoryStatus = ${data.categoryStatus}
                                             WHERE bwcId = '${data.bwcId}' AND branchId = '${branchId}'`;
                 pool.query(sql_query_updateData, (err, data) => {
                     if (err) {

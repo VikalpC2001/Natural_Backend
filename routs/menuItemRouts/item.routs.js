@@ -7,13 +7,14 @@ const { protect } = require("../../middlewares/authMiddlewares.js");
 const subCategoryController = require("../../controller/menuItemController/subCategory.controller.js");
 
 router.get('/getSubCategoryList', protect, subCategoryController.getSubCategoryList);
-router.get('/ddlSubCategory', subCategoryController.ddlSubCategory);
+router.get('/ddlSubCategory', protect, subCategoryController.ddlSubCategory);
 router.post('/addSubCategoryData', protect, subCategoryController.addSubCategoryData);
 router.delete('/removeSubCategoryData', protect, subCategoryController.removeSubCategoryData);
 router.post('/updateSubCategoryData', protect, subCategoryController.updateSubCategoryData);
 router.post('/addSubCategoryPeriod', protect, subCategoryController.addSubCategoryPeriod);
 router.post('/updateSubCategoryPeriod', protect, subCategoryController.updateSubCategoryPeriod);
 router.get('/getSubCategoryListForMobile', subCategoryController.getSubCategoryListForMobile);
+router.post('/updateDisplayRankForSubCategory', protect, subCategoryController.updateDisplayRankForSubCategory);
 
 
 // Menu Category Routs
@@ -31,35 +32,27 @@ router.get('/copyPriceAndStatusByMenuId', protect, menuCategoryController.copyPr
 const itemController = require("../../controller/menuItemController/item.controller.js");
 
 router.get('/getItemData', protect, itemController.getItemData);
-router.post('/addItemData', itemController.addItemData);
+router.post('/addItemData', protect, itemController.addItemData);
 router.delete('/removeItemData', protect, itemController.removeItemData);
 router.post('/updateItemData', protect, itemController.updateItemData);
 router.post('/updateMultipleItemPrice', protect, itemController.updateMultipleItemPrice);
 router.get('/updateItemStatus', protect, itemController.updateItemStatus);
-router.get('/getItemSalesReport', itemController.getItemSalesReport);
-router.post('/updateItemPriceByMenuId', itemController.updateItemPriceByMenuId);
-router.get('/exportPdfForItemSalesReport', itemController.exportPdfForItemSalesReport);
-router.get('/getItmeDataForTouchView', itemController.getItmeDataForTouchView);
-router.get('/getItemDataByCode', itemController.getItemDataByCode);
+router.get('/getItemSalesReport', protect, itemController.getItemSalesReport);
+router.post('/updateItemPriceByMenuId', protect, itemController.updateItemPriceByMenuId);
+router.get('/exportPdfForItemSalesReport', protect, itemController.exportPdfForItemSalesReport);
+router.get('/getItmeDataForTouchView', protect, itemController.getItmeDataForTouchView);
+router.get('/getItemDataByCode', protect, itemController.getItemDataByCode);
+router.post('/addFavouritemByBranch', protect, itemController.addFavouritemByBranch);
 
 // Addon Group Routs
 
-const addonGroupController = require("../../controller/menuItemController/addonGroup.controller.js");
-
-router.get('/getAddOnsGroupList', protect, addonGroupController.getAddOnsGroupList);
-router.post('/addAddOnsGroupData', protect, addonGroupController.addAddOnsGroupData);
-router.delete('/removeAddOnsGgroupData', protect, addonGroupController.removeAddOnsGgroupData);
-router.post('/updateAddOnsGroupData', protect, addonGroupController.updateAddOnsGroupData);
-router.get('/getItemListByAddon', protect, addonGroupController.getItemListByAddon);
-router.post('/assignAddonGroup', protect, addonGroupController.assignAddonGroup);
-
-// Addon Routs
-
 const addonController = require("../../controller/menuItemController/addon.controller.js");
 
-router.get('/getAddOnsList', protect, addonController.getAddOnsList);
-router.post('/addAddOnsData', protect, addonController.addAddOnsData);
-router.delete('/removeAddOnsData', protect, addonController.removeAddOnsData);
-router.post('/updateAddOnsData', protect, addonController.updateAddOnsData);
+router.get('/getAddOnsGroupList', protect, addonController.getAddOnsGroupList);
+router.post('/addAddonGroupData', protect, addonController.addAddonGroupData);
+router.delete('/removeAddonGroupData', protect, addonController.removeAddonGroupData);
+router.post('/updateAddonGroupData', protect, addonController.updateAddonGroupData);
+router.get('/getItemListByAddon', protect, addonController.getItemListByAddon);
+router.post('/assignAddonGroup', protect, addonController.assignAddonGroup);
 
 module.exports = router;

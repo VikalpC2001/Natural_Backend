@@ -1,6 +1,5 @@
 const pool = require('../../database');
 const jwt = require("jsonwebtoken");
-const pool2 = require('../../databasePool');
 
 // Get Comment List
 
@@ -24,6 +23,55 @@ const getComment = async (req, res) => {
                 return res.status(200).send(data);
             }
         });
+    } catch (error) {
+        console.error('An error occurred', error);
+        res.status(500).json('Internal Server Error');
+    }
+}
+
+// Get Comment Data For Dashboard
+
+const getCommentData = (req, res) => {
+    try {
+        const page = req.query.page;
+        const numPerPage = req.query.numPerPage;
+        const skip = (page - 1) * numPerPage;
+        const limit = skip + ',' + numPerPage;
+        const searchWord = req.query.searchWord ? req.query.searchWord : '';
+        sql_querry_getCountDetails = `SELECT count(*) as numRows FROM billing_comment_data
+                                      WHERE comment LIKE '%` + searchWord + `%'`;
+        pool.query(sql_querry_getCountDetails, (err, rows, fields) => {
+            if (err) {
+                console.error("An error occurred in SQL Queery", err);
+                return res.status(500).send('Database Error');
+            } else {
+                const numRows = rows[0].numRows;
+                const numPages = Math.ceil(numRows / numPerPage);
+                const sql_query_getDetails = `SELECT
+                                                bcd.commentId,
+                                                bcd.comment
+                                              FROM
+                                                  billing_comment_data AS bcd
+                                              WHERE comment LIKE '%` + searchWord + `%'
+                                              ORDER BY bcd.comment ASC
+                                              LIMIT ${limit}`;
+                pool.query(sql_query_getDetails, (err, rows, fields) => {
+                    if (err) {
+                        console.error("An error occurred in SQL Queery", err);
+                        return res.status(500).send('Database Error');;
+                    } else {
+                        if (numRows === 0) {
+                            const rows = [{
+                                'msg': 'No Data Found'
+                            }]
+                            return res.status(200).send({ rows, numRows });
+                        } else {
+                            return res.status(200).send({ rows, numRows });
+                        }
+                    }
+                });
+            }
+        })
     } catch (error) {
         console.error('An error occurred', error);
         res.status(500).json('Internal Server Error');
@@ -159,6 +207,7 @@ const updateComment = async (req, res) => {
 
 module.exports = {
     getComment,
+    getCommentData,
     addComment,
     removeComment,
     updateComment

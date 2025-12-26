@@ -90,47 +90,72 @@ async function createPDF(res, datas) {
 
 const getItemData = (req, res) => {
     try {
-        const menuId = req.query.menuId ? req.query.menuId : 'base_2001';
-        const subCategoryId = req.query.subCategoryId ? req.query.subCategoryId : '';
-        const sql_query_staticQuery = `SELECT itemId, itemName, itemGujaratiName, itemCode, itemShortKey, itemSubCategory, spicyLevel, isJain, isPureJain, itemDescription, isFavourite FROM item_menuList_data`;
-        if (!menuId) {
-            return res.status(404).send('menuId Not Found');
-        } else if (req.query.subCategoryId) {
-            sql_querry_getItem = `${sql_query_staticQuery}
-                                  WHERE itemSubCategory = '${subCategoryId}'
-                                  ORDER BY itemCode ASC`;
-        } else {
-            sql_querry_getItem = `${sql_query_staticQuery}
-                                  ORDER BY itemCode ASC`;
-        }
-        pool.query(sql_querry_getItem, (err, rows) => {
-            if (err) {
-                console.error("An error occurred in SQL Queery", err);
-                return res.status(500).send('Database Error');
+        let token;
+        token = req.headers ? req.headers.authorization.split(" ")[1] : null;
+        if (token) {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            const branchId = decoded.id.branchId;
+
+            const menuId = req.query.menuId ? req.query.menuId : 'base_2001';
+            const subCategoryId = req.query.subCategoryId ? req.query.subCategoryId : '';
+            const sql_query_staticQuery = `SELECT
+                                                i.itemId,
+                                                i.itemName,
+                                                i.itemGujaratiName,
+                                                i.itemCode,
+                                                i.itemShortKey,
+                                                i.itemSubCategory,
+                                                i.spicyLevel,
+                                                i.isJain,
+                                                i.isPureJain,
+                                                i.itemDescription,
+                                                EXISTS(
+                                                    SELECT 1 FROM item_branchWiseFavourite_data f
+                                                    WHERE f.itemId = i.itemId AND f.branchId = '${branchId}'
+                                                ) AS isFavourite                                            
+                                            FROM 
+                                            item_menuList_data i`;
+            if (!menuId) {
+                return res.status(404).send('menuId Not Found');
+            } else if (req.query.subCategoryId) {
+                sql_querry_getItem = `${sql_query_staticQuery}
+                                      WHERE i.itemSubCategory = '${subCategoryId}'
+                                      ORDER BY i.itemCode ASC`;
             } else {
-                const datas = Object.values(JSON.parse(JSON.stringify(rows)));
-                if (datas.length) {
-                    varientDatas(datas, menuId)
-                        .then((data) => {
-                            const combinedData = datas.map((item, index) => (
-                                {
-                                    ...item,
-                                    variantsList: data[index].varients,
-                                    allVariantsList: data[index].allVariantsList,
-                                    periods: data[index].periods,
-                                    status: data[index].status
-                                }
-                            ))
-                            return res.status(200).send(combinedData);
-                        }).catch(error => {
-                            console.error('Error in processing datas :', error);
-                            return res.status(500).send('Internal Error');
-                        });
-                } else {
-                    return res.status(400).send('No Data Found');
-                }
+                sql_querry_getItem = `${sql_query_staticQuery}
+                                      ORDER BY i.itemCode ASC`;
             }
-        })
+            pool.query(sql_querry_getItem, (err, rows) => {
+                if (err) {
+                    console.error("An error occurred in SQL Queery", err);
+                    return res.status(500).send('Database Error');
+                } else {
+                    const datas = Object.values(JSON.parse(JSON.stringify(rows)));
+                    if (datas.length) {
+                        varientDatas(datas, menuId)
+                            .then((data) => {
+                                const combinedData = datas.map((item, index) => (
+                                    {
+                                        ...item,
+                                        variantsList: data[index].varients,
+                                        allVariantsList: data[index].allVariantsList,
+                                        periods: data[index].periods,
+                                        status: data[index].status
+                                    }
+                                ))
+                                return res.status(200).send(combinedData);
+                            }).catch(error => {
+                                console.error('Error in processing datas :', error);
+                                return res.status(500).send('Internal Error');
+                            });
+                    } else {
+                        return res.status(400).send('No Data Found');
+                    }
+                }
+            })
+        } else {
+            return res.status(404).send('Please Login First...!');
+        }
     } catch (error) {
         console.error('An error occurred', error);
         res.status(500).json('Internal Server Error');
@@ -217,13 +242,13 @@ const addItemData = (req, res) => {
 
                                             let addvariants = menuCategoryList.map((menuId, index) => {
                                                 const tempData = variantJson.map((item, index) => {
-                                                    return `('${menuId.menuCategoryId}', '${itemId}', '${item.unit}', ${item.price}, ${item.status})`;
+                                                    return `('${menuId.menuCategoryId}', '${itemId}', ${item.preferredName ? `TRIM('${item.preferredName}')` : null}, '${item.unit}', ${item.price}, ${item.status})`;
                                                 })
                                                 return tempData.join(', ')
                                             })
 
                                             const newAddvarients = addvariants.join(', ');
-                                            let sql_querry_addVariants = `INSERT INTO item_unitWisePrice_data (menuCategoryId, itemId, unit, price, status)
+                                            let sql_querry_addVariants = `INSERT INTO item_unitWisePrice_data (menuCategoryId, itemId, preferredName, unit, price, status)
                                                                           VALUES ${newAddvarients}`;
                                             conn.query(sql_querry_addVariants, (err, variant) => {
                                                 if (err) {
@@ -396,11 +421,11 @@ const updateItemData = (req, res) => {
                                                     const variantJson = itemData.variantsList;
 
                                                     const addvariants = variantJson.map((item, index) => {
-                                                        return `('${itemData.menuCategoryId}', '${itemData.itemId}', '${item.unit}', ${item.price}, ${item.status})`;
+                                                        return `('${itemData.menuCategoryId}', '${itemData.itemId}', ${item.preferredName ? `TRIM('${item.preferredName}')` : null}, '${item.unit}', ${item.price}, ${item.status})`;
                                                     })
 
                                                     const newAddvarients = addvariants.join(', ');
-                                                    let sql_querry_addVariants = `INSERT INTO item_unitWisePrice_data (menuCategoryId, itemId, unit, price, status)
+                                                    let sql_querry_addVariants = `INSERT INTO item_unitWisePrice_data (menuCategoryId, itemId, preferredName, unit, price, status)
                                                                                   VALUES ${newAddvarients}`;
                                                     conn.query(sql_querry_addVariants, (err, variant) => {
                                                         if (err) {
@@ -753,9 +778,15 @@ const updateItemPriceByMenuId = (req, res) => {
 
 const getItmeDataForTouchView = (req, res) => {
     try {
-        const menuId = req.query.menuId ? req.query.menuId : 'base_2001';
-        const searchWord = req.query.searchWord ? req.query.searchWord : '';
-        const sql_query_staticQuery = `SELECT
+        let token;
+        token = req.headers && req.headers.authorization ? req.headers.authorization.split(" ")[1] : null;
+        if (token) {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            const branchId = decoded.id.branchId;
+
+            const menuId = req.query.menuId ? req.query.menuId : 'base_2001';
+            const searchWord = req.query.searchWord ? req.query.searchWord : '';
+            const sql_query_staticQuery = `SELECT
                                            imd.itemId AS itemId,
                                            imd.itemName AS itemName,
                                            imd.itemGujaratiName AS itemGujaratiName,
@@ -767,83 +798,85 @@ const getItmeDataForTouchView = (req, res) => {
                                            imd.spicyLevel AS spicyLevel,
                                            imd.isJain AS isJain,
                                            imd.isPureJain AS isPureJain,
-                                           imd.itemDescription AS itemDescription,
-                                           imd.isFavourite AS isFavourite
+                                           imd.itemDescription AS itemDescription
                                        FROM
                                            item_menuList_data AS imd
                                        INNER JOIN item_subCategory_data AS iscd ON iscd.subCategoryId = imd.itemSubCategory`;
-        let sql_querry_getItem = `${sql_query_staticQuery}
-                                  WHERE imd.itemName LIKE '%` + searchWord + `%'
-                                  ORDER BY iscd.displayRank ASC, imd.itemName ASC;
-                                  ${sql_query_staticQuery}
-                                  WHERE imd.isFavourite = 1
-                                  ORDER BY imd.itemName ASC;`;
-        pool.query(sql_querry_getItem, (err, rows) => {
-            if (err) {
-                console.error("An error occurred in SQL Queery", err);
-                return res.status(500).send('Database Error');
-            } else {
-                const datas = Object.values(JSON.parse(JSON.stringify(rows[0])));
-                if (datas.length) {
-                    varientDatas(datas, menuId)
-                        .then((data) => {
-                            const combinedData = datas.map((item, index) => (
-                                {
-                                    ...item,
-                                    variantsList: data[index].varients,
-                                    allVariantsList: data[index].allVariantsList,
-                                    periods: data[index].periods,
-                                    status: data[index].status
-                                }
-                            ))
-
-                            const favouritesData = Object.values(JSON.parse(JSON.stringify(rows[1])));
-                            varientDatas(favouritesData, menuId)
-                                .then((fdata) => {
-                                    const favouriteCombinedData = favouritesData.map((item, index) => (
-                                        {
-                                            ...item,
-                                            variantsList: fdata[index].varients,
-                                            allVariantsList: fdata[index].allVariantsList,
-                                            periods: fdata[index].periods,
-                                            status: fdata[index].status
-                                        }
-                                    ))
-
-                                    const result = combinedData.reduce((acc, item) => {
-                                        const key = item.subCategoryName;
-                                        if (!acc[key]) {
-                                            acc[key] = [];
-                                        }
-                                        acc[key].push(item);
-                                        return acc;
-                                    }, {});
-                                    let categoryArray = Object.keys(result)
-                                    if (!searchWord) {
-                                        favouriteCombinedData.length !== 0 ? categoryArray.unshift('Favourite Items',) : '';
-                                    }
-
-                                    const newJson = {
-                                        categoryList: categoryArray,
-                                        itemList: searchWord ? result : {
-                                            'Favourite Items': favouriteCombinedData,
-                                            ...result
-                                        }
-                                    }
-                                    return res.status(200).send(newJson);
-                                }).catch(error => {
-                                    console.error('Error in processing datas :', error);
-                                    return res.status(500).send('Internal Error');
-                                });
-                        }).catch(error => {
-                            console.error('Error in processing datas :', error);
-                            return res.status(500).send('Internal Error');
-                        });
+            let sql_querry_getItem = `${sql_query_staticQuery}
+                                      WHERE imd.itemName LIKE '%` + searchWord + `%'
+                                      ORDER BY iscd.displayRank ASC, imd.itemName ASC;
+                                      ${sql_query_staticQuery}
+                                      WHERE imd.itemId IN (SELECT COALESCE(itemId,NULL) FROM item_branchWiseFavourite_data WHERE branchId = '${branchId}')
+                                      ORDER BY imd.itemName ASC;`;
+            pool.query(sql_querry_getItem, (err, rows) => {
+                if (err) {
+                    console.error("An error occurred in SQL Queery", err);
+                    return res.status(500).send('Database Error');
                 } else {
-                    return res.status(400).send('No Data Found');
+                    const datas = Object.values(JSON.parse(JSON.stringify(rows[0])));
+                    if (datas.length) {
+                        varientDatas(datas, menuId)
+                            .then((data) => {
+                                const combinedData = datas.map((item, index) => (
+                                    {
+                                        ...item,
+                                        variantsList: data[index].varients,
+                                        allVariantsList: data[index].allVariantsList,
+                                        periods: data[index].periods,
+                                        status: data[index].status
+                                    }
+                                ))
+
+                                const favouritesData = Object.values(JSON.parse(JSON.stringify(rows[1])));
+                                varientDatas(favouritesData, menuId)
+                                    .then((fdata) => {
+                                        const favouriteCombinedData = favouritesData.map((item, index) => (
+                                            {
+                                                ...item,
+                                                variantsList: fdata[index].varients,
+                                                allVariantsList: fdata[index].allVariantsList,
+                                                periods: fdata[index].periods,
+                                                status: fdata[index].status
+                                            }
+                                        ))
+
+                                        const result = combinedData.reduce((acc, item) => {
+                                            const key = item.subCategoryName;
+                                            if (!acc[key]) {
+                                                acc[key] = [];
+                                            }
+                                            acc[key].push(item);
+                                            return acc;
+                                        }, {});
+                                        let categoryArray = Object.keys(result)
+                                        if (!searchWord) {
+                                            favouriteCombinedData.length !== 0 ? categoryArray.unshift('Favourite Items',) : '';
+                                        }
+
+                                        const newJson = {
+                                            categoryList: categoryArray,
+                                            itemList: searchWord ? result : {
+                                                'Favourite Items': favouriteCombinedData,
+                                                ...result
+                                            }
+                                        }
+                                        return res.status(200).send(newJson);
+                                    }).catch(error => {
+                                        console.error('Error in processing datas :', error);
+                                        return res.status(500).send('Internal Error');
+                                    });
+                            }).catch(error => {
+                                console.error('Error in processing datas :', error);
+                                return res.status(500).send('Internal Error');
+                            });
+                    } else {
+                        return res.status(400).send('No Data Found');
+                    }
                 }
-            }
-        })
+            })
+        } else {
+            return res.status(404).send('Please Login First...!');
+        }
     } catch (error) {
         console.error('An error occurred', error);
         res.status(500).json('Internal Server Error');
@@ -911,6 +944,60 @@ const getItemDataByCode = (req, res) => {
     }
 }
 
+// Add to Favourite By Branch
+
+const addFavouritemByBranch = (req, res) => {
+    try {
+        let token;
+        token = req.headers && req.headers.authorization ? req.headers.authorization.split(" ")[1] : null;
+        if (token) {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            const branchId = decoded.id.branchId;
+            const uid1 = new Date();
+            const favouriteId = String("favourite_" + uid1.getTime());
+            const itemId = req.body.itemId ? req.body.itemId : null;
+            const isFavourite = req.body.isFavourite ? req.body.isFavourite : false;
+
+            if (!branchId) {
+                return res.status(400).send("branchId Not Found");
+            } else if (!itemId) {
+                return res.status(400).send("itemId Not Found");
+            } else {
+                const sql_query_existData = `SELECT itemId FROM item_branchWiseFavourite_data WHERE itemId = '${itemId}' AND branchId = '${branchId}'`;
+                pool.query(sql_query_existData, (err, row) => {
+                    if (err) {
+                        console.error("An error occurred in SQL Queery", err);
+                        return res.status(500).send('Database Error');
+                    } else {
+                        if ((row && !row.length) && !isFavourite) {
+                            return res.status(400).send(`Item Not Exist..!`);
+                        } else if ((row && row.length) && isFavourite) {
+                            return res.status(400).send(`Item is Already In Favourite`);
+                        } else {
+                            const sql_querry_addFavourite = `INSERT INTO item_branchWiseFavourite_data(favouriteId, branchId, itemId)
+                                                             VALUES ('${favouriteId}', '${branchId}', '${itemId}')`;
+                            const sql_query_removeFavourite = `DELETE FROM item_branchWiseFavourite_data WHERE itemId = '${itemId}' AND branchId = '${branchId}'`;
+                            pool.query(isFavourite ? sql_querry_addFavourite : sql_query_removeFavourite, (err, data) => {
+                                if (err) {
+                                    console.error("An error occurred in SQL Queery", err);
+                                    return res.status(500).send('Database Error');
+                                } else {
+                                    return res.status(200).send(isFavourite ? `Item added to your Favourites!` : `Item removed to your Favourites!`);
+                                }
+                            })
+                        }
+                    }
+                })
+            }
+        } else {
+            return res.status(404).send('Please Login First...!');
+        }
+    } catch (error) {
+        console.error('An error occurred', error);
+        res.status(500).json('Internal Server Error');
+    }
+}
+
 module.exports = {
     getItemData,
     addItemData,
@@ -922,5 +1009,6 @@ module.exports = {
     updateItemPriceByMenuId,
     exportPdfForItemSalesReport,
     getItmeDataForTouchView,
-    getItemDataByCode
+    getItemDataByCode,
+    addFavouritemByBranch
 }
