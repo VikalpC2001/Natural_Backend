@@ -61,7 +61,7 @@ router.get('/getAllTableView', protect, dineInController.getAllTableView);
 router.post('/addDineInOrder', protect, dineInController.addDineInOrder);
 router.delete('/removeSubTokenDataById', protect, dineInController.removeSubTokenDataById);
 router.post('/updateSubTokenDataById', protect, dineInController.updateSubTokenDataById);
-router.get('/manageTableByArea', protect, dineInController.manageTableByArea);
+router.post('/manageTableByArea', protect, dineInController.manageTableByArea);
 router.get('/printTableBill', protect, dineInController.printTableBill);
 router.post('/updateDineInBillData', protect, dineInController.updateDineInBillData);
 router.post('/sattledBillDataByID', protect, dineInController.sattledBillDataByID);
@@ -69,6 +69,11 @@ router.post('/cancelBillDataByID', protect, dineInController.cancelBillDataByID)
 router.get('/moveTable', protect, dineInController.moveTable);
 router.get('/isTableEmpty', protect, dineInController.isTableEmpty);
 router.get('/sattledCancelTokenTable', protect, dineInController.sattledCancelTokenTable);
+router.post('/updateBillDataWithPrintByID', protect, dineInController.updateBillDataWithPrintByID);
+router.get('/getAreaDeatails', protect, dineInController.getAreaDeatails);
+router.post('/updateDisplayRankForArea', protect, dineInController.updateDisplayRankForArea);
+router.post('/addAreaDetails', protect, dineInController.addAreaDetails);
+router.delete('/removeAreaDetailsById', protect, dineInController.removeAreaDetailsById);
 
 const billingController = require("../../controller/billingController/billing.controller.js");
 
@@ -121,5 +126,12 @@ router.get('/ddlUPI', protect, upiConntroller.ddlUPI);
 router.get('/setDefaultUPI', protect, upiConntroller.setDefaultUPI);
 router.get('/getUPITransactionById', protect, upiConntroller.getUPITransactionById);
 router.get('/getUPIStaticsById', protect, upiConntroller.getUPIStaticsById);
+
+// Settle Routs
+
+const settleController = require("../../controller/billingController/settle.controller.js");
+router.post('/dryRunSettleBills', protect, settleController.dryRunSettleBills);
+router.post('/settleBills', protect, settleController.settleBills);
+router.get('/getTempTestData', protect, settleController.getTempTestData);
 
 module.exports = router;

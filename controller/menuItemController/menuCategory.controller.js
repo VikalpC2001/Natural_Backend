@@ -87,11 +87,12 @@ const addMenuCategory = async (req, res) => {
                                             const sql_querry_addMenuItem = `INSERT INTO item_unitWisePrice_data(
                                                                                                     menuCategoryId,
                                                                                                     itemId,
+                                                                                                    preferredName,
                                                                                                     unit,
                                                                                                     price,
                                                                                                     status
                                                                                                 )
-                                                                SELECT '${menuCategoryId}', itemId, unit, price, status FROM item_unitWisePrice_data 
+                                                                SELECT '${menuCategoryId}', itemId, preferredName, unit, price, status FROM item_unitWisePrice_data 
                                                                 WHERE menuCategoryId = '${baseMenuId}'`;
                                             conn.query(sql_querry_addMenuItem, (err, data) => {
                                                 if (err) {

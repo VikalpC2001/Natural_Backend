@@ -214,7 +214,7 @@ const getLiveViewByCategoryId = (req, res) => {
                                                              FROM
                                                                  billing_billWiseItem_data AS bwid
                                                              INNER JOIN item_menuList_data AS imd ON imd.itemId = bwid.itemId
-                                                             LEFT JOIN item_unitWisePrice_data AS uwp ON uwp.itemId = bwid.itemId AND uwp.unit = bwid.unit
+                                                             LEFT JOIN item_unitWisePrice_data AS uwp ON uwp.itemId = bwid.itemId AND uwp.unit = bwid.unit AND uwp.menuCategoryId = '${process.env.BASE_MENU}'
                                                              WHERE bwid.billId = '${billId}'`;
                             let sql_query_getItemWiseAddons = `SELECT
                                                                iwad.iwaId AS iwaId,
@@ -254,7 +254,8 @@ const getLiveViewByCategoryId = (req, res) => {
                                                             bwtn.tableNo AS tableNo,
                                                             bwtn.areaId AS areaId,
                                                             bwtn.assignCaptain AS assignCaptain,
-                                                            dia.areaName AS areaName
+                                                            dia.areaName AS areaName,
+                                                            IFNULL(CONCAT(dia.prefix, ' ', bwtn.tableNo), bwtn.tableNo) AS displayTableNo
                                                           FROM
                                                             billing_billWiseTableNo_data AS bwtn
                                                           LEFT JOIN billing_dineInArea_data dia ON dia.areaId = bwtn.areaId
@@ -514,7 +515,7 @@ const getBillDataByToken = (req, res) => {
                                                                          FROM
                                                                              billing_billWiseItem_data AS bwid
                                                                          INNER JOIN item_menuList_data AS imd ON imd.itemId = bwid.itemId
-                                                                         LEFT JOIN item_unitWisePrice_data AS uwp ON uwp.itemId = bwid.itemId AND uwp.unit = bwid.unit
+                                                                         LEFT JOIN item_unitWisePrice_data AS uwp ON uwp.itemId = bwid.itemId AND uwp.unit = bwid.unit AND uwp.menuCategoryId = '${process.env.BASE_MENU}'
                                                                          WHERE bwid.billId = '${billId}'`;
                                         let sql_query_getItemWiseAddons = `SELECT
                                                                                iwad.iwaId AS iwaId,
@@ -554,7 +555,8 @@ const getBillDataByToken = (req, res) => {
                                                                         bwtn.tableNo AS tableNo,
                                                                         bwtn.areaId AS areaId,
                                                                         bwtn.assignCaptain AS assignCaptain,
-                                                                        dia.areaName AS areaName
+                                                                        dia.areaName AS areaName,
+                                                                        IFNULL(CONCAT(dia.prefix, ' ', bwtn.tableNo), bwtn.tableNo) AS displayTableNo
                                                                       FROM
                                                                         billing_billWiseTableNo_data AS bwtn
                                                                       LEFT JOIN billing_dineInArea_data dia ON dia.areaId = bwtn.areaId
@@ -697,7 +699,7 @@ const getBillDataById = (req, res) => {
                                                              FROM
                                                                  billing_billWiseItem_data AS bwid
                                                              INNER JOIN item_menuList_data AS imd ON imd.itemId = bwid.itemId
-                                                             LEFT JOIN item_unitWisePrice_data AS uwp ON uwp.itemId = bwid.itemId AND uwp.unit = bwid.unit
+                                                             LEFT JOIN item_unitWisePrice_data AS uwp ON uwp.itemId = bwid.itemId AND uwp.unit = bwid.unit AND uwp.menuCategoryId = '${process.env.BASE_MENU}'
                                                              WHERE bwid.billId = '${billId}'`;
                             let sql_query_getItemWiseAddons = `SELECT
                                                                    iwad.iwaId AS iwaId,
@@ -737,13 +739,13 @@ const getBillDataById = (req, res) => {
                                                             bwtn.tableNo AS tableNo,
                                                             bwtn.areaId AS areaId,
                                                             bwtn.assignCaptain AS assignCaptain,
-                                                            dia.areaName AS areaName
+                                                            dia.areaName AS areaName,
+                                                            IFNULL(CONCAT(dia.prefix, ' ', bwtn.tableNo), bwtn.tableNo) AS displayTableNo
                                                           FROM
                                                             billing_billWiseTableNo_data AS bwtn
                                                           LEFT JOIN billing_dineInArea_data dia ON dia.areaId = bwtn.areaId
                                                           WHERE billId = '${billId}'`;
                             let sql_querry_getSubTokens = `SELECT subTokenNumber FROM billing_subToken_data WHERE billId = '${billId}'`;
-
                             const sql_query_getBillData = `${sql_query_getBillingData};
                                                            ${sql_query_getBillwiseItem};
                                                            ${sql_query_getFirmData};
@@ -824,14 +826,7 @@ const addPickUpBillData = (req, res) => {
 
                         const currentDate = getCurrentDate();
                         const billData = req.body;
-                        console.log('customerDetails', billData.customerDetails,
-                            'BID', branchId,
-                            'FID', billData.firmId,
-                            'subTotal', billData.subTotal,
-                            'settledAmount', billData.settledAmount,
-                            'billPayType', billData.billPayType,
-                            'billStatus', billData.billStatus,
-                            'itemsData', billData.itemsData)
+
                         if (!billData.customerDetails || !branchId || !billData.firmId || !billData.subTotal || !billData.settledAmount || !billData.billPayType || !billData.billStatus || !billData.itemsData) {
                             connection.rollback(() => {
                                 connection.release();
@@ -839,9 +834,10 @@ const addPickUpBillData = (req, res) => {
                             })
                         } else {
                             const isComplimentary = billData.billPayType == 'complimentary' ? true : false;
-                            let sql_query_getOfficialLastBillNo = `SELECT COALESCE(MAX(billNumber),0) AS officialLastBillNo FROM billing_Official_data WHERE firmId = '${billData.firmId}' AND billCreationDate = (SELECT MAX(billCreationDate) FROM billing_Official_data WHERE firmId = '${billData.firmId}') FOR UPDATE`;
-                            let sql_query_getComplimentaryLastBillNo = `SELECT COALESCE(MAX(billNumber),0) AS complimentaryBillNo FROM billing_Complimentary_data WHERE firmId = '${billData.firmId}' AND billCreationDate = (SELECT MAX(billCreationDate) FROM billing_Complimentary_data WHERE firmId = '${billData.firmId}') FOR UPDATE`;
-                            let sql_query_getLastBillNo = `SELECT COALESCE(MAX(billNumber),0) AS lastBillNo FROM billing_data WHERE firmId = '${billData.firmId}' AND billCreationDate = (SELECT MAX(billCreationDate) FROM billing_data WHERE firmId = '${billData.firmId}') FOR UPDATE;
+                            const currentDateMD = `DATE_FORMAT(STR_TO_DATE('${currentDate}', '%b %d %Y'), '%m-%d')`;
+                            let sql_query_getOfficialLastBillNo = `SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS officialLastBillNo FROM billing_Official_data bod CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm WHERE bod.firmId = '${billData.firmId}' AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bod.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bod.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE`;
+                            let sql_query_getComplimentaryLastBillNo = `SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS complimentaryBillNo FROM billing_Complimentary_data bcd CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm WHERE bcd.firmId = '${billData.firmId}' AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bcd.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bcd.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE`;
+                            let sql_query_getLastBillNo = `SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS lastBillNo FROM billing_data bd CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm WHERE bd.firmId = '${billData.firmId}' AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bd.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bd.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE;
                                                            SELECT COALESCE(MAX(tokenNo),0) AS lastTokenNo FROM billing_token_data WHERE billType = '${billData.billType}' AND branchId = '${branchId}' AND billDate = STR_TO_DATE('${currentDate}','%b %d %Y') FOR UPDATE;
                                                            ${billData.isOfficial && !isComplimentary ? sql_query_getOfficialLastBillNo : isComplimentary ? sql_query_getComplimentaryLastBillNo : ''}`;
                             connection.query(sql_query_getLastBillNo, (err, result) => {
@@ -1005,7 +1001,6 @@ const addPickUpBillData = (req, res) => {
                                                                         billDate: new Date(currentDate).toLocaleDateString('en-GB'),
                                                                         billTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                                                                     }
-                                                                    console.log(sendJson);
                                                                     const tokenList = firm && firm[1].length ? firm[1] : null;
                                                                     const customerData = billData.customerDetails;
                                                                     if (customerData && customerData.customerId && customerData.addressId) {
@@ -1229,8 +1224,8 @@ const addPickUpBillData = (req, res) => {
                                                                                             }
                                                                                         })
                                                                                     } else if (customerData.address?.trim()) {
-                                                                                        let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, branchId, customerName, customerMobileNumber, birthDate, anniversaryDate)
-                                                                                                                         VALUES ('${newCustomerId}', '${branchId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
+                                                                                        let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, customerName, customerMobileNumber, birthDate, anniversaryDate)
+                                                                                                                         VALUES ('${newCustomerId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
                                                                                         connection.query(sql_querry_addNewCustomer, (err) => {
                                                                                             if (err) {
                                                                                                 console.error("Error inserting New Customer Data:", err);
@@ -1305,8 +1300,8 @@ const addPickUpBillData = (req, res) => {
                                                                                             }
                                                                                         });
                                                                                     } else if (customerData.mobileNo) {
-                                                                                        let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, branchId, customerName, customerMobileNumber, birthDate, anniversaryDate)
-                                                                                                                         VALUES ('${newCustomerId}', '${branchId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
+                                                                                        let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, customerName, customerMobileNumber, birthDate, anniversaryDate)
+                                                                                                                         VALUES ('${newCustomerId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
                                                                                         connection.query(sql_querry_addNewCustomer, (err) => {
                                                                                             if (err) {
                                                                                                 console.error("Error inserting New Customer Data:", err);
@@ -1443,6 +1438,7 @@ const addPickUpBillData = (req, res) => {
 }
 
 // Add Delivery Bill Data
+
 const addDeliveryBillData = (req, res) => {
     pool2.getConnection((err, connection) => {
         if (err) {
@@ -1472,9 +1468,10 @@ const addDeliveryBillData = (req, res) => {
                             })
                         } else {
                             const isComplimentary = billData.billPayType == 'complimentary' ? true : false;
-                            let sql_query_getOfficialLastBillNo = `SELECT COALESCE(MAX(billNumber),0) AS officialLastBillNo FROM billing_Official_data WHERE firmId = '${billData.firmId}' AND billCreationDate = (SELECT MAX(billCreationDate) FROM billing_Official_data WHERE firmId = '${billData.firmId}') FOR UPDATE`;
-                            let sql_query_getComplimentaryLastBillNo = `SELECT COALESCE(MAX(billNumber),0) AS complimentaryBillNo FROM billing_Complimentary_data WHERE firmId = '${billData.firmId}' AND billCreationDate = (SELECT MAX(billCreationDate) FROM billing_Complimentary_data WHERE firmId = '${billData.firmId}') FOR UPDATE`;
-                            let sql_query_getLastBillNo = `SELECT COALESCE(MAX(billNumber),0) AS lastBillNo FROM billing_data WHERE firmId = '${billData.firmId}' AND billCreationDate = (SELECT MAX(billCreationDate) FROM billing_data WHERE firmId = '${billData.firmId}') FOR UPDATE;
+                            const currentDateMD = `DATE_FORMAT(STR_TO_DATE('${currentDate}', '%b %d %Y'), '%m-%d')`;
+                            let sql_query_getOfficialLastBillNo = `SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS officialLastBillNo FROM billing_Official_data bod CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm WHERE bod.firmId = '${billData.firmId}' AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bod.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bod.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE`;
+                            let sql_query_getComplimentaryLastBillNo = `SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS complimentaryBillNo FROM billing_Complimentary_data bcd CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm WHERE bcd.firmId = '${billData.firmId}' AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bcd.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bcd.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE`;
+                            let sql_query_getLastBillNo = `SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS lastBillNo FROM billing_data bd CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm WHERE bd.firmId = '${billData.firmId}' AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bd.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bd.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE;
                                                            SELECT COALESCE(MAX(tokenNo),0) AS lastTokenNo FROM billing_token_data WHERE billType = '${billData.billType}' AND branchId = '${branchId}' AND billDate = STR_TO_DATE('${currentDate}','%b %d %Y') FOR UPDATE;
                                                            ${billData.isOfficial && !isComplimentary ? sql_query_getOfficialLastBillNo : isComplimentary ? sql_query_getComplimentaryLastBillNo : ''}`;
                             connection.query(sql_query_getLastBillNo, (err, result) => {
@@ -1860,8 +1857,8 @@ const addDeliveryBillData = (req, res) => {
                                                                                             }
                                                                                         })
                                                                                     } else if (customerData.address?.trim()) {
-                                                                                        let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, branchId, customerName, customerMobileNumber, birthDate, anniversaryDate)
-                                                                                                                         VALUES ('${newCustomerId}', '${branchId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
+                                                                                        let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, customerName, customerMobileNumber, birthDate, anniversaryDate)
+                                                                                                                         VALUES ('${newCustomerId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
                                                                                         connection.query(sql_querry_addNewCustomer, (err) => {
                                                                                             if (err) {
                                                                                                 console.error("Error inserting New Customer Data:", err);
@@ -1936,8 +1933,8 @@ const addDeliveryBillData = (req, res) => {
                                                                                             }
                                                                                         });
                                                                                     } else if (customerData.mobileNo) {
-                                                                                        let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, branchId, customerName, customerMobileNumber, birthDate, anniversaryDate)
-                                                                                                                         VALUES ('${newCustomerId}', '${branchId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
+                                                                                        let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, customerName, customerMobileNumber, birthDate, anniversaryDate)
+                                                                                                                         VALUES ('${newCustomerId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
                                                                                         connection.query(sql_querry_addNewCustomer, (err) => {
                                                                                             if (err) {
                                                                                                 console.error("Error inserting New Customer Data:", err);
@@ -2097,15 +2094,18 @@ const updatePickUpBillData = (req, res) => {
 
                         const currentDate = getCurrentDate();
                         const billData = req.body;
-                        console.log(billData.billStatus);
+                        const isComplimentary = billData.billPayType == 'complimentary' ? true : false;
                         if (!billData.billId || !branchId || !billData.customerDetails || !billData.subTotal || !billData.settledAmount || !billData.billPayType || !billData.billStatus || !billData.itemsData) {
                             connection.rollback(() => {
                                 connection.release();
                                 return res.status(404).send('Please Fill All The Fields..!');
                             })
                         } else {
+                            const currentDateMD = `DATE_FORMAT(STR_TO_DATE('${currentDate}', '%b %d %Y'), '%m-%d')`;
                             let sql_query_chkOfficial = `SELECT billId, billNumber FROM billing_Official_data WHERE billId = '${billData.billId}';
-                                                         SELECT COALESCE(MAX(billNumber),0) AS officialLastBillNo FROM billing_Official_data WHERE firmId = '${billData.firmId}' AND billCreationDate = (SELECT MAX(billCreationDate) FROM billing_Official_data WHERE firmId = '${billData.firmId}') FOR UPDATE`;
+                                                         SELECT billId, billNumber FROM billing_Complimentary_data WHERE billId = '${billData.billId}';
+                                                         SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS officialLastBillNo FROM billing_Official_data bod CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm WHERE bod.firmId = '${billData.firmId}' AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bod.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bod.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE;
+                                                         SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS complimentaryLastBillNo FROM billing_Complimentary_data bcd CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm WHERE bcd.firmId = '${billData.firmId}' AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bcd.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bcd.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE`;
                             connection.query(sql_query_chkOfficial, (err, chkExist) => {
                                 if (err) {
                                     console.error("Error check official bill exist or not:", err);
@@ -2114,11 +2114,12 @@ const updatePickUpBillData = (req, res) => {
                                         return res.status(500).send('Database Error');
                                     });
                                 } else {
-                                    console.log(chkExist);
-                                    const isExist = chkExist && chkExist[0].length ? true : false;
-                                    const staticBillNumber = chkExist && chkExist[0].length ? chkExist[0][0].billNumber : 0;
-                                    const officialLastBillNo = chkExist && chkExist[1] ? chkExist[1][0].officialLastBillNo : 0;
+                                    const isExist = isComplimentary ? (chkExist && chkExist[1].length ? true : false) : (chkExist && chkExist[0].length ? true : false);
+                                    const staticBillNumber = isComplimentary ? (chkExist && chkExist[1].length ? chkExist[1][0].billNumber : 0) : (chkExist && chkExist[0].length ? chkExist[0][0].billNumber : 0);
+                                    const officialLastBillNo = chkExist && chkExist[2] ? chkExist[2][0].officialLastBillNo : 0;
+                                    const complimentaryLastBillNo = chkExist && chkExist[3] ? chkExist[3][0].complimentaryLastBillNo : 0;
                                     const nextOfficialBillNo = officialLastBillNo + 1;
+                                    const nextComplimentaryBillNo = complimentaryLastBillNo + 1;
                                     let sql_query_getBillInfo = `SELECT
                                                                      bd.billId AS billId,
                                                                      bd.billNumber AS billNumber,
@@ -2192,9 +2193,11 @@ const updatePickUpBillData = (req, res) => {
                                                                          billStatus = '${billData.billStatus}'`;
 
                                                 let sql_querry_updateBillInfo = `UPDATE billing_data SET ${updateColumnField} WHERE billId = '${billData.billId}';
-                                                                                 ${!isExist && billData.isOfficial ?
+                                                                                 ${!isExist && billData.isOfficial && !isComplimentary ?
                                                         `INSERT INTO billing_Official_data (billNumber, ${columnData}) VALUES(${nextOfficialBillNo}, ${values})` :
-                                                        `UPDATE billing_Official_data SET ${updateColumnField} WHERE billId = '${billData.billId}'`};
+                                                        !isExist && isComplimentary ?
+                                                            `INSERT INTO billing_Complimentary_data (billNumber, ${columnData}) VALUES(${nextComplimentaryBillNo}, ${values})` :
+                                                            `UPDATE billing_Official_data SET ${updateColumnField} WHERE billId = '${billData.billId}'`};
                                                          UPDATE billing_Complimentary_data SET ${updateColumnField} WHERE billId = '${billData.billId}'`;
 
                                                 connection.query(sql_querry_updateBillInfo, (err) => {
@@ -2290,14 +2293,13 @@ const updatePickUpBillData = (req, res) => {
                                                                                     firmData: firm[0][0],
                                                                                     cashier: cashier,
                                                                                     billNo: billNumber,
-                                                                                    officialBillNo: !isExist && billData.isOfficial ? nextOfficialBillNo : staticBillNumber,
+                                                                                    officialBillNo: billData.isOfficial && !isComplimentary ? (!isExist ? nextOfficialBillNo : staticBillNumber) : isComplimentary ? (!isExist ? 'C' + nextComplimentaryBillNo : 'C' + staticBillNumber) : staticBillNumber || 'Not Available',
                                                                                     tokenNo: 'P' + tokenNo,
                                                                                     justToken: tokenNo,
                                                                                     billDate: billDate,
                                                                                     billTime: billTime
                                                                                 }
-                                                                                console.log(!isExist && billData.isOfficial ? nextOfficialBillNo : staticBillNumber)
-                                                                                console.log(sendJson,)
+
                                                                                 const tokenList = firm && firm[1].length ? firm[1] : null;
                                                                                 const customerData = billData.customerDetails;
                                                                                 if (customerData && customerData.customerId && customerData.addressId) {
@@ -2527,8 +2529,8 @@ const updatePickUpBillData = (req, res) => {
                                                                                                         }
                                                                                                     })
                                                                                                 } else if (customerData.address?.trim()) {
-                                                                                                    let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, branchId, customerName, customerMobileNumber, birthDate, anniversaryDate)
-                                                                                                                                     VALUES ('${newCustomerId}', '${branchId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
+                                                                                                    let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, customerName, customerMobileNumber, birthDate, anniversaryDate)
+                                                                                                                                     VALUES ('${newCustomerId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
                                                                                                     connection.query(sql_querry_addNewCustomer, (err) => {
                                                                                                         if (err) {
                                                                                                             console.error("Error inserting New Customer Data:", err);
@@ -2605,8 +2607,8 @@ const updatePickUpBillData = (req, res) => {
                                                                                                         }
                                                                                                     });
                                                                                                 } else if (customerData.mobileNo) {
-                                                                                                    let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, branchId, customerName, customerMobileNumber, birthDate, anniversaryDate)
-                                                                                                                                     VALUES ('${newCustomerId}', '${branchId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
+                                                                                                    let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, customerName, customerMobileNumber, birthDate, anniversaryDate)
+                                                                                                                                     VALUES ('${newCustomerId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
                                                                                                     connection.query(sql_querry_addNewCustomer, (err) => {
                                                                                                         if (err) {
                                                                                                             console.error("Error inserting New Customer Data:", err);
@@ -2777,15 +2779,18 @@ const updateDeliveryBillData = (req, res) => {
 
                         const currentDate = getCurrentDate();
                         const billData = req.body;
-                        console.log(billData.billStatus);
+                        const isComplimentary = billData.billPayType == 'complimentary' ? true : false;
                         if (!billData.billId || !branchId || !billData.customerDetails || !billData.subTotal || !billData.settledAmount || !billData.billPayType || !billData.billStatus || !billData.itemsData || !billData.customerDetails.mobileNo) {
                             connection.rollback(() => {
                                 connection.release();
                                 return res.status(404).send('Please Fill All The Fields..!');
                             })
                         } else {
+                            const currentDateMD = `DATE_FORMAT(STR_TO_DATE('${currentDate}', '%b %d %Y'), '%m-%d')`;
                             let sql_query_chkOfficial = `SELECT billId, billNumber FROM billing_Official_data WHERE billId = '${billData.billId}';
-                                                         SELECT COALESCE(MAX(billNumber),0) AS officialLastBillNo FROM billing_Official_data WHERE firmId = '${billData.firmId}' AND billCreationDate = (SELECT MAX(billCreationDate) FROM billing_Official_data WHERE firmId = '${billData.firmId}') FOR UPDATE`;
+                                                         SELECT billId, billNumber FROM billing_Complimentary_data WHERE billId = '${billData.billId}';
+                                                         SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS officialLastBillNo FROM billing_Official_data bod CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm WHERE bod.firmId = '${billData.firmId}' AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bod.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bod.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE;
+                                                         SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS complimentaryLastBillNo FROM billing_Complimentary_data bcd CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm WHERE bcd.firmId = '${billData.firmId}' AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bcd.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bcd.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE`;
                             connection.query(sql_query_chkOfficial, (err, chkExist) => {
                                 if (err) {
                                     console.error("Error check official bill exist or not:", err);
@@ -2794,11 +2799,12 @@ const updateDeliveryBillData = (req, res) => {
                                         return res.status(500).send('Database Error');
                                     });
                                 } else {
-                                    console.log(chkExist);
-                                    const isExist = chkExist && chkExist[0].length ? true : false;
-                                    const staticBillNumber = chkExist && chkExist[0].length ? chkExist[0][0].billNumber : 0;
-                                    const officialLastBillNo = chkExist && chkExist[1] ? chkExist[1][0].officialLastBillNo : 0;
+                                    const isExist = isComplimentary ? (chkExist && chkExist[1].length ? true : false) : (chkExist && chkExist[0].length ? true : false);
+                                    const staticBillNumber = isComplimentary ? (chkExist && chkExist[1].length ? chkExist[1][0].billNumber : 0) : (chkExist && chkExist[0].length ? chkExist[0][0].billNumber : 0);
+                                    const officialLastBillNo = chkExist && chkExist[2] ? chkExist[2][0].officialLastBillNo : 0;
+                                    const complimentaryLastBillNo = chkExist && chkExist[3] ? chkExist[3][0].complimentaryLastBillNo : 0;
                                     const nextOfficialBillNo = officialLastBillNo + 1;
+                                    const nextComplimentaryBillNo = complimentaryLastBillNo + 1;
                                     let sql_query_getBillInfo = `SELECT
                                                                      bd.billId AS billId,
                                                                      bd.billNumber AS billNumber,
@@ -2808,7 +2814,7 @@ const updateDeliveryBillData = (req, res) => {
                                                                  FROM
                                                                      billing_data AS bd
                                                                  LEFT JOIN billing_token_data AS btd ON btd.billId = bd.billId
-                                                                 WHERE bd.billId = '${billData.billId}' AND bd.billType = 'Pick Up'`;
+                                                                 WHERE bd.billId = '${billData.billId}' AND bd.billType = 'Delivery'`;
                                     connection.query(sql_query_getBillInfo, (err, billInfo) => {
                                         if (err) {
                                             console.error("Error inserting new bill number:", err);
@@ -2872,9 +2878,11 @@ const updateDeliveryBillData = (req, res) => {
                                                                          billStatus = '${billData.billStatus}'`;
 
                                                 let sql_querry_updateBillInfo = `UPDATE billing_data SET ${updateColumnField} WHERE billId = '${billData.billId}';
-                                                                                 ${!isExist && billData.isOfficial ?
+                                                                                 ${!isExist && billData.isOfficial && !isComplimentary ?
                                                         `INSERT INTO billing_Official_data (billNumber, ${columnData}) VALUES(${nextOfficialBillNo}, ${values})` :
-                                                        `UPDATE billing_Official_data SET ${updateColumnField} WHERE billId = '${billData.billId}'`};
+                                                        !isExist && isComplimentary ?
+                                                            `INSERT INTO billing_Complimentary_data (billNumber, ${columnData}) VALUES(${nextComplimentaryBillNo}, ${values})` :
+                                                            `UPDATE billing_Official_data SET ${updateColumnField} WHERE billId = '${billData.billId}'`};
                                                          UPDATE billing_Complimentary_data SET ${updateColumnField} WHERE billId = '${billData.billId}'`;
 
                                                 connection.query(sql_querry_updateBillInfo, (err) => {
@@ -2940,7 +2948,7 @@ const updateDeliveryBillData = (req, res) => {
                                                                                                         ) AS timeDifference
                                                                                                      FROM billing_token_data AS btd
                                                                                                      LEFT JOIN billing_data AS bd ON bd.billId = btd.billId
-                                                                                                     WHERE btd.billType = 'Pick Up' AND bd.billStatus NOT IN ('complete','Cancel') AND btd.billDate = STR_TO_DATE('${currentDate}','%b %d %Y')
+                                                                                                     WHERE btd.billType = 'Delivery' AND bd.billStatus NOT IN ('complete','Cancel') AND btd.billDate = STR_TO_DATE('${currentDate}','%b %d %Y')
                                                                                                      ORDER BY btd.tokenNo ASC;
                                                                                                      DELETE FROM billing_billWiseUpi_data WHERE billId = '${billData.billId}';
                                                                                                      ${billData.accountId && billData.billPayType == 'due' ? `DELETE FROM due_billAmount_data WHERE billId = '${billData.billId};` : ''}
@@ -2969,14 +2977,12 @@ const updateDeliveryBillData = (req, res) => {
                                                                                     firmData: firm[0][0],
                                                                                     cashier: cashier,
                                                                                     billNo: billNumber,
-                                                                                    officialBillNo: !isExist && billData.isOfficial ? nextOfficialBillNo : staticBillNumber,
+                                                                                    officialBillNo: billData.isOfficial && !isComplimentary ? (!isExist ? nextOfficialBillNo : staticBillNumber) : isComplimentary ? (!isExist ? 'C' + nextComplimentaryBillNo : 'C' + staticBillNumber) : staticBillNumber || 'Not Available',
                                                                                     tokenNo: 'D' + tokenNo,
                                                                                     justToken: tokenNo,
                                                                                     billDate: billDate,
                                                                                     billTime: billTime
                                                                                 }
-                                                                                console.log(!isExist && billData.isOfficial ? nextOfficialBillNo : staticBillNumber)
-                                                                                console.log(sendJson,)
                                                                                 const tokenList = firm && firm[1].length ? firm[1] : null;
                                                                                 const customerData = billData.customerDetails;
                                                                                 if (customerData && customerData.customerId && customerData.addressId) {
@@ -3206,8 +3212,8 @@ const updateDeliveryBillData = (req, res) => {
                                                                                                         }
                                                                                                     })
                                                                                                 } else if (customerData.address?.trim()) {
-                                                                                                    let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, branchId, customerName, customerMobileNumber, birthDate, anniversaryDate)
-                                                                                                                                     VALUES ('${newCustomerId}', '${branchId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
+                                                                                                    let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, customerName, customerMobileNumber, birthDate, anniversaryDate)
+                                                                                                                                     VALUES ('${newCustomerId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
                                                                                                     connection.query(sql_querry_addNewCustomer, (err) => {
                                                                                                         if (err) {
                                                                                                             console.error("Error inserting New Customer Data:", err);
@@ -3284,8 +3290,8 @@ const updateDeliveryBillData = (req, res) => {
                                                                                                         }
                                                                                                     });
                                                                                                 } else if (customerData.mobileNo) {
-                                                                                                    let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, branchId, customerName, customerMobileNumber, birthDate, anniversaryDate)
-                                                                                                                                     VALUES ('${newCustomerId}', '${branchId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
+                                                                                                    let sql_querry_addNewCustomer = `INSERT INTO billing_customer_data(customerId, customerName, customerMobileNumber, birthDate, anniversaryDate)
+                                                                                                                                     VALUES ('${newCustomerId}', ${customerData.customerName ? `TRIM('${customerData.customerName}')` : null}, ${customerData.mobileNo ? `'${customerData.mobileNo}'` : null}, ${customerData.birthDate ? `STR_TO_DATE('${customerData.birthDate}','%b %d %Y')` : null}, ${customerData.aniversaryDate ? `STR_TO_DATE('${customerData.aniversaryDate}','%b %d %Y')` : null})`;
                                                                                                     connection.query(sql_querry_addNewCustomer, (err) => {
                                                                                                         if (err) {
                                                                                                             console.error("Error inserting New Customer Data:", err);

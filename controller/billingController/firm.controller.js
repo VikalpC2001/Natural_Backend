@@ -192,7 +192,8 @@ const getFirmData = (req, res) => {
                                                 firmAddress AS firmAddress,
                                                 pincode AS pincode,
                                                 firmMobileNo AS firmMobileNo,
-                                                otherMobileNo AS otherMobileNo
+                                                otherMobileNo AS otherMobileNo,
+                                                resetDate AS resetDate
                                               FROM
                                                 billing_firm_data AS bfd
                                               WHERE bfd.firmName LIKE '%` + searchWord + `%'
@@ -275,6 +276,7 @@ const addFirmData = async (req, res) => {
                     pincode: req.body.pincode ? req.body.pincode : null,
                     firmMobileNo: req.body.firmMobileNo ? req.body.firmMobileNo : null,
                     otherMobileNo: req.body.otherMobileNo ? req.body.otherMobileNo : null,
+                    resetDate: req.body.resetDate ? req.body.resetDate : '04-01'
                 }
                 if (!data.firmName || !data.gstNumber || !data.firmAddress || !data.pincode || !data.firmMobileNo) {
                     return res.status(400).send("Please Fill All The Fields...!");
@@ -286,8 +288,8 @@ const addFirmData = async (req, res) => {
                         } else if (row && row.length) {
                             return res.status(400).send('Firm is Already In Use');
                         } else {
-                            const sql_querry_addCategory = `INSERT INTO billing_firm_data (firmId, firmName, gstNumber, firmAddress, pincode, firmMobileNo, otherMobileNo)  
-                                                            VALUES ('${firmId}','${data.firmName}','${data.gstNumber}','${data.firmAddress}',${data.pincode},'${data.firmMobileNo}',NULLIF('${data.otherMobileNo}','null'))`;
+                            const sql_querry_addCategory = `INSERT INTO billing_firm_data (firmId, firmName, gstNumber, firmAddress, pincode, firmMobileNo, otherMobileNo, resetDate)  
+                                                            VALUES ('${firmId}','${data.firmName}','${data.gstNumber}','${data.firmAddress}',${data.pincode},'${data.firmMobileNo}',NULLIF('${data.otherMobileNo}','null'),'${data.resetDate}')`;
                             pool.query(sql_querry_addCategory, (err, data) => {
                                 if (err) {
                                     console.error("An error occurred in SQL Queery", err);
@@ -363,6 +365,7 @@ const updateFirmData = async (req, res) => {
             pincode: req.body.pincode ? req.body.pincode : null,
             firmMobileNo: req.body.firmMobileNo ? req.body.firmMobileNo : null,
             otherMobileNo: req.body.otherMobileNo ? req.body.otherMobileNo : null,
+            resetDate: req.body.resetDate ? req.body.resetDate : '04-01'
         }
         if (!data.firmId || !data.firmName || !data.gstNumber || !data.firmAddress || !data.pincode || !data.firmMobileNo) {
             return res.status(400).send("Please Fill All The Fields...!");
@@ -384,7 +387,8 @@ const updateFirmData = async (req, res) => {
                                                     firmAddress = '${data.firmAddress}',
                                                     pincode = ${data.pincode},
                                                     firmMobileNo = '${data.firmMobileNo}',
-                                                    otherMobileNo = NULLIF('${data.otherMobileNo}','null')
+                                                    otherMobileNo = NULLIF('${data.otherMobileNo}','null'),
+                                                    resetDate = '${data.resetDate}'
                                                   WHERE firmId = '${data.firmId}'`;
                 pool.query(sql_querry_updatedetails, (err, data) => {
                     if (err) {
