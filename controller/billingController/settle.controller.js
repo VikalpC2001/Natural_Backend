@@ -140,8 +140,9 @@ const dryRunSettleBills = (req, res) => {
                     finalTotal: originalTotal,
                     updatedBillsCount: 0,
                     message: "Target amount is greater than or equal to original total. No items need to be deleted.",
-                    summary: { iterations: 0, totalDeletedItems: 0 },
-                    deletedItemsByBill: {},
+                    summary: { iterations: 0, totalReducedQty: 0, totalReducedValue: "0.00", totalDeletedItems: 0, totalDeletedValue: "0.00" },
+                    reducedItemsByBill: [],
+                    deletedItemsByBill: [],
                     updatedBills: bills.map(b => ({
                         billId: b.billId,
                         totalAmount: parseFloat(b.totalAmount || 0),
@@ -152,9 +153,11 @@ const dryRunSettleBills = (req, res) => {
                 });
             }
 
-            // Check if any bills have multiple items
-            const billsWithMultipleItems = bills.filter(b => b.items && b.items.length > 1);
-            if (billsWithMultipleItems.length === 0) {
+            // Check if any bills have multiple items or items with qty > 1
+            const billsEligible = bills.filter(b =>
+                b.items && (b.items.length > 1 || b.items.some(item => item.qty > 1))
+            );
+            if (billsEligible.length === 0) {
                 conn.release();
                 return res.json({
                     mode: "dry-run",
@@ -162,9 +165,10 @@ const dryRunSettleBills = (req, res) => {
                     targetAmount,
                     finalTotal: originalTotal,
                     updatedBillsCount: 0,
-                    message: "No bills have multiple items. Cannot delete items without leaving bills empty.",
-                    summary: { iterations: 0, totalDeletedItems: 0 },
-                    deletedItemsByBill: {},
+                    message: "No bills have multiple items or items with qty > 1. Cannot reduce/delete items without leaving bills empty.",
+                    summary: { iterations: 0, totalReducedQty: 0, totalReducedValue: "0.00", totalDeletedItems: 0, totalDeletedValue: "0.00" },
+                    reducedItemsByBill: [],
+                    deletedItemsByBill: [],
                     updatedBills: bills.map(b => ({
                         billId: b.billId,
                         totalAmount: parseFloat(b.totalAmount || 0),
@@ -175,47 +179,95 @@ const dryRunSettleBills = (req, res) => {
                 });
             }
 
-            // 5. Simulate deletions with safety limit
+            // 5. Simulate reductions and deletions with safety limit
             const MAX_ITERATIONS = 10000; // Safety limit to prevent infinite loops
             let currentTotal = originalTotal;
             const deletedItemsByBill = {};
+            const reducedItemsByBill = {};
             let iterations = 0;
 
             while (currentTotal > targetAmount && iterations < MAX_ITERATIONS) {
-                let deleted = false;
+                let modified = false;
 
+                // Phase 1: Try to reduce quantities first (for items with qty > 1)
                 for (const bill of bills) {
-                    if (bill.items && bill.items.length > 1) {
-                        const item = bill.items[0]; // highest priced item
-                        bill.items.shift(); // remove from array
+                    if (bill.items && bill.items.length >= 1) {
+                        // Find highest-priced item with qty > 1
+                        const itemWithQty = bill.items.find(item => item.qty > 1);
+                        if (itemWithQty) {
+                            // Calculate price per unit
+                            const pricePerUnit = parseFloat(itemWithQty.price) / itemWithQty.qty;
 
-                        // Track deleted items by bill
-                        if (!deletedItemsByBill[bill.billId]) {
-                            deletedItemsByBill[bill.billId] = {
-                                billDetails: {
-                                    billId: bill.billId,
-                                    billNumber: bill.billNumber,
-                                    billDate: bill.billDate,
-                                    originalTotal: parseFloat(bill.totalAmount || 0)
-                                },
-                                items: []
-                            };
+                            // Track reduction before modifying
+                            if (!reducedItemsByBill[bill.billId]) {
+                                reducedItemsByBill[bill.billId] = {
+                                    billDetails: {
+                                        billId: bill.billId,
+                                        billNumber: bill.billNumber,
+                                        billDate: bill.billDate,
+                                        originalTotal: parseFloat(bill.totalAmount || 0)
+                                    },
+                                    items: []
+                                };
+                            }
+                            reducedItemsByBill[bill.billId].items.push({
+                                ...itemWithQty,
+                                reducedQty: 1,
+                                reducedAmount: pricePerUnit.toFixed(2)
+                            });
+
+                            // Reduce qty by 1
+                            itemWithQty.qty -= 1;
+                            itemWithQty.price = (pricePerUnit * itemWithQty.qty).toFixed(2);
+
+                            // Recalculate bill totals using helper function
+                            const totals = calculateBillTotals(bill, bill.items);
+                            bill.totalAmount = totals.totalAmount;
+                            bill.totalDiscount = totals.totalDiscount;
+                            bill.settledAmount = totals.settledAmount;
+
+                            currentTotal -= pricePerUnit;
+                            modified = true;
+                            break; // only one modification per iteration
                         }
-                        deletedItemsByBill[bill.billId].items.push(item);
-
-                        // Recalculate bill totals using helper function
-                        const totals = calculateBillTotals(bill, bill.items);
-                        bill.totalAmount = totals.totalAmount;
-                        bill.totalDiscount = totals.totalDiscount;
-                        bill.settledAmount = totals.settledAmount;
-
-                        currentTotal -= parseFloat(item.price || 0);
-                        deleted = true;
-                        break; // only one item per iteration
                     }
                 }
 
-                if (!deleted) break; // no more items can be deleted
+                // Phase 2: If no quantities to reduce, try deleting items (only if bill has multiple items)
+                if (!modified) {
+                    for (const bill of bills) {
+                        if (bill.items && bill.items.length > 1) {
+                            const item = bill.items[0]; // highest priced item
+                            bill.items.shift(); // remove from array
+
+                            // Track deleted items by bill
+                            if (!deletedItemsByBill[bill.billId]) {
+                                deletedItemsByBill[bill.billId] = {
+                                    billDetails: {
+                                        billId: bill.billId,
+                                        billNumber: bill.billNumber,
+                                        billDate: bill.billDate,
+                                        originalTotal: parseFloat(bill.totalAmount || 0)
+                                    },
+                                    items: []
+                                };
+                            }
+                            deletedItemsByBill[bill.billId].items.push(item);
+
+                            // Recalculate bill totals using helper function
+                            const totals = calculateBillTotals(bill, bill.items);
+                            bill.totalAmount = totals.totalAmount;
+                            bill.totalDiscount = totals.totalDiscount;
+                            bill.settledAmount = totals.settledAmount;
+
+                            currentTotal -= parseFloat(item.price || 0);
+                            modified = true;
+                            break; // only one item per iteration
+                        }
+                    }
+                }
+
+                if (!modified) break; // no more modifications possible
                 iterations++;
             }
 
@@ -225,27 +277,27 @@ const dryRunSettleBills = (req, res) => {
 
             // 6. Build summary statistics
             const allDeleted = Object.values(deletedItemsByBill).flatMap(b => b.items);
-            let summary = {};
+            const allReduced = Object.values(reducedItemsByBill).flatMap(b => b.items);
+
+            let summary = {
+                iterations,
+                totalReducedQty: allReduced.reduce((sum, item) => sum + item.reducedQty, 0),
+                totalReducedValue: allReduced.reduce((sum, item) => sum + parseFloat(item.reducedAmount || 0), 0).toFixed(2),
+                totalDeletedItems: allDeleted.length,
+                totalDeletedValue: allDeleted.reduce((sum, item) => sum + parseFloat(item.price || 0), 0).toFixed(2)
+            };
+
             if (allDeleted.length > 0) {
                 const prices = allDeleted.map(d => parseFloat(d.price || 0)).filter(p => !isNaN(p));
                 if (prices.length > 0) {
-                    summary = {
-                        iterations,
-                        totalDeletedItems: allDeleted.length,
-                        largestDeletedItem: Math.max(...prices),
-                        smallestDeletedItem: Math.min(...prices),
-                        averageDeletedValue: (prices.reduce((a, b) => a + b, 0) / prices.length).toFixed(2),
-                        totalDeletedValue: prices.reduce((a, b) => a + b, 0).toFixed(2)
-                    };
-                } else {
-                    summary = { iterations, totalDeletedItems: allDeleted.length };
+                    summary.largestDeletedItem = Math.max(...prices);
+                    summary.smallestDeletedItem = Math.min(...prices);
+                    summary.averageDeletedValue = (prices.reduce((a, b) => a + b, 0) / prices.length).toFixed(2);
                 }
-            } else {
-                summary = { iterations, totalDeletedItems: 0 };
             }
 
             // 7. Build response (optimized - only send necessary data)
-            const updatedBillsCount = Object.keys(deletedItemsByBill).length;
+            const updatedBillsCount = new Set([...Object.keys(deletedItemsByBill), ...Object.keys(reducedItemsByBill)]).size;
             conn.release();
             res.json({
                 mode: "dry-run",
@@ -255,6 +307,13 @@ const dryRunSettleBills = (req, res) => {
                 amountReduction: (originalTotal - currentTotal).toFixed(2),
                 updatedBillsCount: updatedBillsCount,
                 summary,
+                reducedItemsByBill: Object.entries(reducedItemsByBill).map(([billId, data]) => ({
+                    billId,
+                    billDetails: data.billDetails,
+                    reducedItems: data.items,
+                    totalReducedQty: data.items.reduce((sum, item) => sum + item.reducedQty, 0),
+                    totalReducedValue: data.items.reduce((sum, item) => sum + parseFloat(item.reducedAmount || 0), 0).toFixed(2)
+                })),
                 deletedItemsByBill: Object.entries(deletedItemsByBill).map(([billId, data]) => ({
                     billId,
                     billDetails: data.billDetails,
@@ -378,74 +437,149 @@ const settleBills = (req, res) => {
                 return;
             }
 
-            // Check if any bills have multiple items
-            const billsWithMultipleItems = bills.filter(b => b.items && b.items.length > 1);
-            if (billsWithMultipleItems.length === 0) {
+            // Check if any bills have multiple items or items with qty > 1
+            const billsEligible = bills.filter(b =>
+                b.items && (b.items.length > 1 || b.items.some(item => item.qty > 1))
+            );
+            if (billsEligible.length === 0) {
                 await queryAsync(conn, "ROLLBACK");
                 res.status(400).json({
-                    message: "No bills have multiple items. Cannot delete items without leaving bills empty.",
+                    message: "No bills have multiple items or items with qty > 1. Cannot reduce/delete items without leaving bills empty.",
                     statusCode: 400
                 });
                 return;
             }
 
-            // 5. Start deleting items with safety limit
+            // 5. Start reducing quantities and deleting items with safety limit
             const MAX_ITERATIONS = 10000; // Safety limit to prevent infinite loops
             let currentTotal = originalTotal;
             const deletedItemsByBill = {};
+            const reducedItemsByBill = {};
             let iterations = 0;
 
             while (currentTotal > targetAmount && iterations < MAX_ITERATIONS) {
-                let deleted = false;
+                let modified = false;
 
+                // Phase 1: Try to reduce quantities first (for items with qty > 1)
                 for (const bill of bills) {
-                    if (bill.items && bill.items.length > 1) {
-                        const item = bill.items[0]; // highest priced item
-                        bill.items.shift(); // remove from array
+                    if (bill.items && bill.items.length >= 1) {
+                        // Find highest-priced item with qty > 1
+                        const itemWithQty = bill.items.find(item => item.qty > 1);
+                        if (itemWithQty) {
+                            // Calculate price per unit
+                            const pricePerUnit = parseFloat(itemWithQty.price) / itemWithQty.qty;
+                            const oldQty = itemWithQty.qty;
+                            const oldPrice = parseFloat(itemWithQty.price);
 
-                        // Track deleted items by bill
-                        if (!deletedItemsByBill[bill.billId]) {
-                            deletedItemsByBill[bill.billId] = {
-                                billDetails: {
-                                    billId: bill.billId,
-                                    billNumber: bill.billNumber,
-                                    billDate: bill.billDate,
-                                    originalTotal: parseFloat(bill.totalAmount || 0)
-                                },
-                                items: []
-                            };
+                            // Track reduction before modifying
+                            if (!reducedItemsByBill[bill.billId]) {
+                                reducedItemsByBill[bill.billId] = {
+                                    billDetails: {
+                                        billId: bill.billId,
+                                        billNumber: bill.billNumber,
+                                        billDate: bill.billDate,
+                                        originalTotal: parseFloat(bill.totalAmount || 0)
+                                    },
+                                    items: []
+                                };
+                            }
+                            reducedItemsByBill[bill.billId].items.push({
+                                iwbId: itemWithQty.iwbId,
+                                itemName: itemWithQty.itemName,
+                                oldQty: oldQty,
+                                newQty: oldQty - 1,
+                                reducedQty: 1,
+                                reducedAmount: pricePerUnit.toFixed(2)
+                            });
+
+                            // Reduce qty by 1 in DB
+                            const newQty = oldQty - 1;
+                            const newPrice = (pricePerUnit * newQty).toFixed(2);
+                            await queryAsync(
+                                conn,
+                                `UPDATE billing_billWiseItem_data 
+                                 SET qty = ?, price = ? 
+                                 WHERE iwbId = ?`,
+                                [newQty, newPrice, itemWithQty.iwbId]
+                            );
+
+                            // Update in memory
+                            itemWithQty.qty = newQty;
+                            itemWithQty.price = newPrice;
+
+                            // Recalculate bill totals using helper function
+                            const totals = calculateBillTotals(bill, bill.items);
+                            bill.totalAmount = totals.totalAmount;
+                            bill.totalDiscount = totals.totalDiscount;
+                            bill.settledAmount = totals.settledAmount;
+
+                            // Update bill in DB
+                            await queryAsync(
+                                conn,
+                                `UPDATE billing_data 
+                                 SET totalAmount = ?, totalDiscount = ?, settledAmount = ? 
+                                 WHERE billId = ?`,
+                                [bill.totalAmount, bill.totalDiscount, bill.settledAmount, bill.billId]
+                            );
+
+                            currentTotal -= pricePerUnit;
+                            modified = true;
+                            break; // only one modification per iteration
                         }
-                        deletedItemsByBill[bill.billId].items.push(item);
-
-                        // Delete from DB
-                        await queryAsync(
-                            conn,
-                            `DELETE FROM billing_billWiseItem_data WHERE iwbId = ?`,
-                            [item.iwbId]
-                        );
-
-                        // Recalculate bill totals using helper function
-                        const totals = calculateBillTotals(bill, bill.items);
-                        bill.totalAmount = totals.totalAmount;
-                        bill.totalDiscount = totals.totalDiscount;
-                        bill.settledAmount = totals.settledAmount;
-
-                        // Update bill in DB
-                        await queryAsync(
-                            conn,
-                            `UPDATE billing_data 
-                             SET totalAmount = ?, totalDiscount = ?, settledAmount = ? 
-                             WHERE billId = ?`,
-                            [bill.totalAmount, bill.totalDiscount, bill.settledAmount, bill.billId]
-                        );
-
-                        currentTotal -= parseFloat(item.price || 0);
-                        deleted = true;
-                        break; // only one item per iteration
                     }
                 }
 
-                if (!deleted) break; // no more items can be deleted
+                // Phase 2: If no quantities to reduce, try deleting items (only if bill has multiple items)
+                if (!modified) {
+                    for (const bill of bills) {
+                        if (bill.items && bill.items.length > 1) {
+                            const item = bill.items[0]; // highest priced item
+                            bill.items.shift(); // remove from array
+
+                            // Track deleted items by bill
+                            if (!deletedItemsByBill[bill.billId]) {
+                                deletedItemsByBill[bill.billId] = {
+                                    billDetails: {
+                                        billId: bill.billId,
+                                        billNumber: bill.billNumber,
+                                        billDate: bill.billDate,
+                                        originalTotal: parseFloat(bill.totalAmount || 0)
+                                    },
+                                    items: []
+                                };
+                            }
+                            deletedItemsByBill[bill.billId].items.push(item);
+
+                            // Delete from DB
+                            await queryAsync(
+                                conn,
+                                `DELETE FROM billing_billWiseItem_data WHERE iwbId = ?`,
+                                [item.iwbId]
+                            );
+
+                            // Recalculate bill totals using helper function
+                            const totals = calculateBillTotals(bill, bill.items);
+                            bill.totalAmount = totals.totalAmount;
+                            bill.totalDiscount = totals.totalDiscount;
+                            bill.settledAmount = totals.settledAmount;
+
+                            // Update bill in DB
+                            await queryAsync(
+                                conn,
+                                `UPDATE billing_data 
+                                 SET totalAmount = ?, totalDiscount = ?, settledAmount = ? 
+                                 WHERE billId = ?`,
+                                [bill.totalAmount, bill.totalDiscount, bill.settledAmount, bill.billId]
+                            );
+
+                            currentTotal -= parseFloat(item.price || 0);
+                            modified = true;
+                            break; // only one item per iteration
+                        }
+                    }
+                }
+
+                if (!modified) break; // no more modifications possible
                 iterations++;
             }
 
@@ -455,33 +589,34 @@ const settleBills = (req, res) => {
 
             // 6. Build summary statistics
             const allDeleted = Object.values(deletedItemsByBill).flatMap(b => b.items);
-            let summary = {};
+            const allReduced = Object.values(reducedItemsByBill).flatMap(b => b.items);
+
+            let summary = {
+                iterations,
+                totalReducedQty: allReduced.reduce((sum, item) => sum + item.reducedQty, 0),
+                totalReducedValue: allReduced.reduce((sum, item) => sum + parseFloat(item.reducedAmount || 0), 0).toFixed(2),
+                totalDeletedItems: allDeleted.length,
+                totalDeletedValue: allDeleted.reduce((sum, item) => sum + parseFloat(item.price || 0), 0).toFixed(2)
+            };
+
             if (allDeleted.length > 0) {
                 const prices = allDeleted.map(d => parseFloat(d.price || 0)).filter(p => !isNaN(p));
                 if (prices.length > 0) {
-                    summary = {
-                        iterations,
-                        totalDeletedItems: allDeleted.length,
-                        largestDeletedItem: Math.max(...prices),
-                        smallestDeletedItem: Math.min(...prices),
-                        averageDeletedValue: (prices.reduce((a, b) => a + b, 0) / prices.length).toFixed(2),
-                        totalDeletedValue: prices.reduce((a, b) => a + b, 0).toFixed(2)
-                    };
-                } else {
-                    summary = { iterations, totalDeletedItems: allDeleted.length };
+                    summary.largestDeletedItem = Math.max(...prices);
+                    summary.smallestDeletedItem = Math.min(...prices);
+                    summary.averageDeletedValue = (prices.reduce((a, b) => a + b, 0) / prices.length).toFixed(2);
                 }
-            } else {
-                summary = { iterations, totalDeletedItems: 0 };
             }
 
             // 7. Commit changes
             await queryAsync(conn, "COMMIT");
 
-            // 8. Return simple success response
+            // 8. Return success response with details
             const amountReduction = originalTotal - currentTotal;
             res.status(200).json({
-                message: `Bills settled successfully. ${summary.totalDeletedItems} items deleted, reducing total by ${amountReduction.toFixed(2)}`,
-                statusCode: 200
+                message: `Bills settled successfully. ${summary.totalReducedQty} quantities reduced and ${summary.totalDeletedItems} items deleted, reducing total by ${amountReduction.toFixed(2)}`,
+                statusCode: 200,
+                summary
             });
 
         } catch (error) {
@@ -503,7 +638,16 @@ const settleBills = (req, res) => {
 
 const getTempTestData = (req, res) => {
     try {
-        let sql_query_getTempTestData = `SELECT startDate, endDate, creationDate FROM temp_test_data ORDER BY creationDate desc LIMIT 10`;
+        let sql_query_getTempTestData = `SELECT 
+                                            DATE_FORMAT(startDate, '%d-%b-%Y') AS fromDate, 
+                                            DATE_FORMAT(endDate, '%d-%b-%Y') AS toDate, 
+                                            DATE_FORMAT(creationDate, '%a, %d %b %Y') AS creationDate, 
+                                            DATE_FORMAT(creationDate, '%r') AS creationTime,
+                                            creationDate AS sortDate
+                                         FROM 
+                                            temp_test_data 
+                                         ORDER BY sortDate DESC 
+                                         LIMIT 10`;
         pool.query(sql_query_getTempTestData, (err, data) => {
             if (err) {
                 console.error("Error in getTempTestData:", err);

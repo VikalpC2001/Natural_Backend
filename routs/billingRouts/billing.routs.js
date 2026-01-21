@@ -93,7 +93,10 @@ router.post('/updatePickUpBillData', protect, billingController.updatePickUpBill
 router.post('/updateDeliveryBillData', protect, billingController.updateDeliveryBillData);
 router.get('/updateBillStatusById', protect, billingController.updateBillStatusById);
 
-// Print Bill Data
+// Admin Routs
+
+router.get('/getAdminServerId', protect, billingController.getAdminServerId);
+router.get('/makeMeAdmin', protect, billingController.makeMeAdmin);
 router.get('/printBillInAdminSystem', protect, billingController.printBillInAdminSystem);
 
 // Hold Billing Routs
@@ -130,8 +133,10 @@ router.get('/getUPIStaticsById', protect, upiConntroller.getUPIStaticsById);
 // Settle Routs
 
 const settleController = require("../../controller/billingController/settle.controller.js");
+
 router.post('/dryRunSettleBills', protect, settleController.dryRunSettleBills);
 router.post('/settleBills', protect, settleController.settleBills);
 router.get('/getTempTestData', protect, settleController.getTempTestData);
+
 
 module.exports = router;

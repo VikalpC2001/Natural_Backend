@@ -102,7 +102,12 @@ const getAllTableView = (req, res) => {
                                               WHEN dt.billId IS NULL THEN 'blank'
                                               ELSE bd.billStatus
                                           END AS tableStatus,
-                                          dt.isFixed,
+                                          dt.isFixed AS isFixed,
+                                          bd.billPayType AS billPayType,
+                                          bd.discountType AS discountType,
+                                          COALESCE(bd.discountValue, 0) AS discountValue,
+                                          COALESCE(bd.totalDiscount, 0) AS totalDiscount,
+                                          COALESCE(bd.totalAmount, 0) AS totalAmount,
                                           COALESCE(bd.settledAmount, 0) AS billAmt,
                                           TIMESTAMPDIFF(MINUTE, bd.billCreationDate, NOW()) AS tableStartTime,
                                           IF(bd.billStatus = 'print',
@@ -1334,7 +1339,7 @@ const printTableBill = (req, res) => {
                                                                         bwtn.tableNo AS tableNo,
                                                                         bwtn.areaId AS areaId,
                                                                         bwtn.assignCaptain AS assignCaptain,
-                                                                        dia.areaName AS areaName
+                                                                        dia.areaName AS areaName,
                                                                         IFNULL(CONCAT(dia.prefix, ' ', bwtn.tableNo), bwtn.tableNo) AS displayTableNo
                                                                       FROM
                                                                         billing_billWiseTableNo_data AS bwtn
@@ -2343,10 +2348,9 @@ const sattledBillDataByID = (req, res) => {
                                                                                                         WHEN bd.billType = 'Dine In' THEN CONCAT('R',btd.tokenNo)
                                                                                                         ELSE NULL
                                                                                                     END AS tokenNo,
-                                                                                                    CASE
-                                                                                                        WHEN bd.billPayType = 'online' THEN bwu.onlineId
-                                                                                                        ELSE NULL
-                                                                                                    END AS onlineId,
+                                                                                                    bwu.onlineId AS onlineId,
+                                                                                                    boud.holderName AS holderName,
+                                                                                                    boud.upiId AS upiId,
                                                                                                     bd.firmId AS firmId, 
                                                                                                     bd.cashier AS cashier, 
                                                                                                     bd.menuStatus AS menuStatus, 
@@ -2370,6 +2374,7 @@ const sattledBillDataByID = (req, res) => {
                                                                                                 LEFT JOIN billing_token_data AS btd ON btd.billId = bd.billId
                                                                                                 LEFT JOIN billing_firm_data AS bfd ON bfd.firmId = bd.firmId
                                                                                                 LEFT JOIN billing_billWiseUpi_data AS bwu ON bwu.billId = bd.billId
+                                                                                                LEFT JOIN billing_onlineUPI_data AS boud ON boud.onlineId = bwu.onlineId
                                                                                                 LEFT JOIN billing_category_data AS bcgd ON bcgd.categoryName = bd.billType
                                                                                                 LEFT JOIN billing_branchWiseCategory_data AS bwcd ON bwcd.categoryId = bcgd.categoryId
                                                                                                 WHERE bd.billId = '${billData.billId}'`;
@@ -2464,10 +2469,17 @@ const sattledBillDataByID = (req, res) => {
                                                                             ...rows[0][0],
                                                                             itemsData: newItemJson,
                                                                             firmData: rows && rows[2] ? rows[2][0] : [],
-                                                                            ...({ customerDetails: rows && rows[4][0] ? rows[4][0] : '' }),
-                                                                            ...({ tableInfo: rows[5][0] }),
-                                                                            subTokens: rows[6].map(item => item.subTokenNumber).sort((a, b) => a - b).join(", "),
-                                                                            tableNo: rows[5][0].tableNo ? rows[5][0].tableNo : 0
+                                                                            ...({ customerDetails: rows && rows[4] && rows[4][0] ? rows[4][0] : '' }),
+                                                                            ...(rows && rows[5] && rows[5][0] ? { tableInfo: rows[5][0] } : ''),
+                                                                            subTokens: rows && rows[6] && rows[6].length ? rows[6].map(item => item.subTokenNumber).sort((a, b) => a - b).join(", ") : null,
+                                                                            tableNo: rows && rows[5] && rows[5][0] ? rows[5][0].tableNo : 0,
+                                                                            ...(['online'].includes(rows[0][0].billPayType) ? {
+                                                                                "upiJson": {
+                                                                                    "onlineId": rows[0][0].onlineId,
+                                                                                    "holderName": rows[0][0].holderName,
+                                                                                    "upiId": rows[0][0].upiId
+                                                                                }
+                                                                            } : '')
                                                                         }
                                                                         connection.commit((err) => {
                                                                             if (err) {
@@ -2645,10 +2657,9 @@ const updateBillDataWithPrintByID = (req, res) => {
                                                                                                         WHEN bd.billType = 'Dine In' THEN CONCAT('R',btd.tokenNo)
                                                                                                         ELSE NULL
                                                                                                     END AS tokenNo,
-                                                                                                    CASE
-                                                                                                        WHEN bd.billPayType = 'online' THEN bwu.onlineId
-                                                                                                        ELSE NULL
-                                                                                                    END AS onlineId,
+                                                                                                    bwu.onlineId AS onlineId,
+                                                                                                    boud.holderName AS holderName,
+                                                                                                    boud.upiId AS upiId,
                                                                                                     bd.firmId AS firmId, 
                                                                                                     bd.cashier AS cashier, 
                                                                                                     bd.menuStatus AS menuStatus, 
@@ -2672,6 +2683,7 @@ const updateBillDataWithPrintByID = (req, res) => {
                                                                                                 LEFT JOIN billing_token_data AS btd ON btd.billId = bd.billId
                                                                                                 LEFT JOIN billing_firm_data AS bfd ON bfd.firmId = bd.firmId
                                                                                                 LEFT JOIN billing_billWiseUpi_data AS bwu ON bwu.billId = bd.billId
+                                                                                                LEFT JOIN billing_onlineUPI_data AS boud ON boud.onlineId = bwu.onlineId
                                                                                                 LEFT JOIN billing_category_data AS bcgd ON bcgd.categoryName = bd.billType
                                                                                                 LEFT JOIN billing_branchWiseCategory_data AS bwcd ON bwcd.categoryId = bcgd.categoryId
                                                                                                 WHERE bd.billId = '${billData.billId}'`;
@@ -2766,10 +2778,17 @@ const updateBillDataWithPrintByID = (req, res) => {
                                                                             ...rows[0][0],
                                                                             itemsData: newItemJson,
                                                                             firmData: rows && rows[2] ? rows[2][0] : [],
-                                                                            ...({ customerDetails: rows && rows[4][0] ? rows[4][0] : '' }),
-                                                                            ...({ tableInfo: rows[5][0] }),
-                                                                            subTokens: rows[6].map(item => item.subTokenNumber).sort((a, b) => a - b).join(", "),
-                                                                            tableNo: rows[5][0].tableNo ? rows[5][0].tableNo : 0
+                                                                            ...({ customerDetails: rows && rows[4] && rows[4][0] ? rows[4][0] : '' }),
+                                                                            ...(rows && rows[5] && rows[5][0] ? { tableInfo: rows[5][0] } : ''),
+                                                                            subTokens: rows && rows[6] && rows[6].length ? rows[6].map(item => item.subTokenNumber).sort((a, b) => a - b).join(", ") : null,
+                                                                            tableNo: rows && rows[5] && rows[5][0] ? rows[5][0].tableNo : 0,
+                                                                            ...(['online'].includes(rows[0][0].billPayType) ? {
+                                                                                "upiJson": {
+                                                                                    "onlineId": rows[0][0].onlineId,
+                                                                                    "holderName": rows[0][0].holderName,
+                                                                                    "upiId": rows[0][0].upiId
+                                                                                }
+                                                                            } : '')
                                                                         }
                                                                         connection.commit((err) => {
                                                                             if (err) {

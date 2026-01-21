@@ -68,7 +68,7 @@ const updateBillCategoryData = (req, res) => {
                 bwcId: req.body.bwcId ? req.body.bwcId : null,
                 menuId: req.body.menuId ? req.body.menuId : null,
                 firmId: req.body.firmId ? req.body.firmId : null,
-                isOfficial: req.body.isOfficial ? req.body.isOfficial : false,
+                isOfficial: req.body.isOfficial ? req.body.isOfficial : true,
                 billFooterNote: req.body.billFooterNote ? req.body.billFooterNote : null,
                 appriciateLine: req.body.appriciateLine ? req.body.appriciateLine : null,
                 categoryStatus: req.body.categoryStatus ? req.body.categoryStatus : 0,
