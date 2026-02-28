@@ -1237,7 +1237,7 @@ const printTableBill = (req, res) => {
                                 const nextOfficialBillNo = officialLastBillNo + 1;
 
                                 let sql_query_addOfficial = `INSERT INTO billing_Official_data(billId, billNumber, firmId, branchId, cashier, menuStatus, billType, billPayType, discountType, discountValue, totalDiscount, totalAmount, settledAmount, billComment, billDate, billStatus)
-                                                         SELECT billId, ${nextOfficialBillNo}, firmId, branchId, cashier, menuStatus, billType, billPayType, discountType, discountValue, totalDiscount, totalAmount, settledAmount, billComment, billDate, 'print' FROM billing_data WHERE billId = '${billId}'`;
+                                                             SELECT billId, ${nextOfficialBillNo}, firmId, branchId, cashier, menuStatus, billType, billPayType, discountType, discountValue, totalDiscount, totalAmount, settledAmount, billComment, billDate, 'print' FROM billing_data WHERE billId = '${billId}'`;
                                 connection.query(sql_query_addOfficial, (err, raw) => {
                                     if (err) {
                                         console.error("An error occurred in SQL Queery", err);
@@ -1578,7 +1578,6 @@ const updateDineInBillData = (req, res) => {
                                                             `INSERT INTO billing_Complimentary_data (billNumber, ${columnData}) VALUES(${nextComplimentaryBillNo}, ${values})` :
                                                             `UPDATE billing_Official_data SET ${updateColumnField} WHERE billId = '${billData.billId}'`};
                                                          UPDATE billing_Complimentary_data SET ${updateColumnField} WHERE billId = '${billData.billId}'`;
-                                                console.log(!isExist && billData.isOfficial, !isExist, billData.isOfficial)
                                                 connection.query(sql_querry_updateBillInfo, (err) => {
                                                     if (err) {
                                                         console.error("Error inserting new bill number:", err);

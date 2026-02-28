@@ -868,6 +868,129 @@ const getTaxReportByFirmId = (req, res) => {
     }
 }
 
+async function createPDFList(res, datas, sumFooterArray, tableHeading, fileName = 'upi-transactions.pdf') {
+    try {
+        const doc = new jsPDF();
+        const jsonData = datas;
+        const keys = Object.keys(jsonData[0]);
+        const columns = [
+            { header: 'Sr.', dataKey: 'serialNo' },
+            ...keys.map(key => ({ header: key, dataKey: key }))
+        ];
+        const data = jsonData.map((item, index) => [index + 1, ...keys.map(key => item[key])]);
+        if (sumFooterArray) {
+            data.push(sumFooterArray);
+        }
+        doc.text(15, 15, tableHeading);
+        doc.autoTable({
+            startY: 20,
+            head: [columns.map(col => col.header)],
+            body: data,
+            theme: 'grid',
+            styles: {
+                cellPadding: 2,
+                halign: 'center',
+                fontSize: 10
+            },
+        });
+        const pdfBytes = await doc.output();
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.send(pdfBytes);
+    } catch (error) {
+        console.error('An error occurred', error);
+        res.status(500).json('Internal Server Error');
+    }
+}
+
+const getBusinessReportDayWiseByFirmId = (req, res) => {
+    try {
+        var date = new Date(), y = date.getFullYear(), m = (date.getMonth());
+        var firstDay = new Date(y, m, 1).toString().slice(4, 15);
+        var lastDay = new Date(y, m + 1, 0).toString().slice(4, 15);
+
+        const data = {
+            firmId: req.query.firmId,
+            startDate: (req.query.startDate ? req.query.startDate : ''),
+            endDate: (req.query.endDate ? req.query.endDate : '')
+        }
+        if (!data.firmId) {
+            return res.status(404).send('Firm Not Found');
+        }
+        const sql_query_staticQuery = `WITH RECURSIVE date_range AS (
+                                           SELECT STR_TO_DATE('${data.startDate ? data.startDate : firstDay}', '%b %d %Y') AS day_date
+                                           UNION ALL
+                                           SELECT day_date + INTERVAL 1 DAY
+                                           FROM date_range
+                                           WHERE day_date < STR_TO_DATE('${data.endDate ? data.endDate : lastDay}', '%b %d %Y')
+                                       ),
+                                       daily_totals AS (
+                                           SELECT
+                                               DATE(bod.billDate) AS bill_date,
+                                               SUM(CASE WHEN bod.billType = 'Pick Up' THEN bod.settledAmount ELSE 0 END) AS pickup_data,
+                                               SUM(CASE WHEN bod.billType = 'Delivery' THEN bod.settledAmount ELSE 0 END) AS delivery_data
+                                           FROM billing_Official_data bod
+                                           WHERE bod.firmId = '${data.firmId}' AND bod.billPayType NOT IN ('cancel','complimentary') AND bod.billDate BETWEEN STR_TO_DATE('${data.startDate ? data.startDate : firstDay}', '%b %d %Y') AND STR_TO_DATE('${data.endDate ? data.endDate : lastDay}', '%b %d %Y')
+                                           GROUP BY DATE(bod.billDate)
+                                       )
+                                       SELECT
+                                           DATE_FORMAT(dr.day_date, '%d-%m-%Y') AS Day,
+                                           COALESCE(dt.pickup_data, 0) AS 'Pickup Data',
+                                           COALESCE(dt.delivery_data, 0) AS 'Delivery Data',
+                                           COALESCE(dt.pickup_data, 0) + COALESCE(dt.delivery_data, 0) AS Total
+                                       FROM date_range dr
+                                       LEFT JOIN daily_totals dt ON dt.bill_date = dr.day_date
+                                       ORDER BY dr.day_date`;
+        const sql_query_getFirmData = `SELECT
+                                           firmName,
+                                           gstNumber,
+                                           CONCAT(firmAddress,' - ',pincode) AS firmAddress
+                                       FROM
+                                           billing_firm_data
+                                       WHERE
+                                           firmId = '${data.firmId}'`
+        let sql_querry_getDetails = `${sql_query_staticQuery}; ${sql_query_getFirmData}`;
+        pool.query(sql_querry_getDetails, (err, queryResult) => {
+            if (err) {
+                console.error("An error occurred in SQL Queery", err);
+                return res.status(500).send('Database Error');
+            } else {
+                if (queryResult && queryResult[0].length) {
+                    const reportData = queryResult[0];
+                    const keys = Object.keys(reportData[0]);
+                    const sumFooter = reportData.reduce((acc, item) => ({
+                        pickup: acc.pickup + parseFloat(item['Pickup Data'] || 0),
+                        delivery: acc.delivery + parseFloat(item['Delivery Data'] || 0),
+                        total: acc.total + parseFloat(item.Total || 0)
+                    }), { pickup: 0, delivery: 0, total: 0 });
+                    const sumFooterArray = ['Total', ...keys.map(key => {
+                        if (key === 'Pickup Data') return sumFooter.pickup.toFixed(2);
+                        if (key === 'Delivery Data') return sumFooter.delivery.toFixed(2);
+                        if (key === 'Total') return sumFooter.total.toFixed(2);
+                        return '';
+                    })];
+                    const firmdata = queryResult && queryResult[1] && queryResult[1].length ? queryResult[1][0] : null;
+                    const tableHeading = firmdata ? `${firmdata.firmName} - Daily Collection Summary` : 'Daily Collection Summary';
+                    createPDFList(res, reportData, sumFooterArray, tableHeading, 'business-report-daywise.pdf')
+                        .then(() => {
+                            console.log('PDF created successfully');
+                            res.status(200);
+                        })
+                        .catch((err) => {
+                            console.log(err);
+                            res.status(500).send('Error creating PDF');
+                        });
+                } else {
+                    return res.status(404).send('No Data Found');
+                }
+            }
+        })
+    } catch (error) {
+        console.error('An error occurred', error);
+        res.status(500).send('Internal Server Error');
+    }
+}
+
 module.exports = {
     getFirmData,
     getFirmDataById,
@@ -880,5 +1003,6 @@ module.exports = {
     getCancelBillDataByFirmId,
     getComplimentaryBillDataByFirmId,
     getMonthWiseBillDataByFirmId,
-    getStaticsDataByFirmId
+    getStaticsDataByFirmId,
+    getBusinessReportDayWiseByFirmId,
 }

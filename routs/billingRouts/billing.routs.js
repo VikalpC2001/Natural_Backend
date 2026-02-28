@@ -50,7 +50,7 @@ router.get('/getCancelBillDataByFirmId', protect, firmController.getCancelBillDa
 router.get('/getComplimentaryBillDataByFirmId', protect, firmController.getComplimentaryBillDataByFirmId);
 router.get('/getMonthWiseBillDataByFirmId', protect, firmController.getMonthWiseBillDataByFirmId);
 router.get('/getStaticsDataByFirmId', protect, firmController.getStaticsDataByFirmId);
-
+router.get('/getBusinessReportDayWiseByFirmId', protect, firmController.getBusinessReportDayWiseByFirmId);
 // Billing Routs
 
 //dine in routes
