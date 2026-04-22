@@ -12,6 +12,7 @@ const userrouter = require('./routs/userRouts/user.routs');
 const branchrouter = require('./routs/branchRouts/branch.routs');
 const menuItemrouter = require('./routs/menuItemRouts/item.routs');
 const billingrouter = require('./routs/billingRouts/billing.routs');
+const captainApprouter = require('./routs/captainAppRouts/captainApp.routs');
 
 // app.use(cors({
 //   credentials: true,
@@ -48,7 +49,7 @@ app.use('/userrouter', userrouter);
 app.use('/branchrouter', branchrouter);
 app.use('/menuItemrouter', menuItemrouter);
 app.use('/billingrouter', billingrouter);
-
+app.use('/captainApprouter', captainApprouter);
 
 app.use(notFound);
 app.use(erroHandler);

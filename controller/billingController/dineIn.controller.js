@@ -177,7 +177,8 @@ const getSubTokensByBillId = async (req, res) => {
                                               iwad.addOnsId,
                                               iad.addonsName,
                                               iad.addonsGujaratiName,
-                                              iad.price AS addonPrice
+                                              iad.price AS addonPrice,
+                                              iwad.addonStatus AS addonStatus
                                           FROM billing_subToken_data bst
                                           LEFT JOIN billing_itemWiseSubToken_data iwst ON iwst.subTokenId = bst.subTokenId    
                                           LEFT JOIN billing_billWiseItem_data bwi ON bwi.iwbId = iwst.iwbId
@@ -185,11 +186,15 @@ const getSubTokensByBillId = async (req, res) => {
                                           LEFT JOIN item_menuList_data imld ON imld.itemId = COALESCE(bwi.itemId, bmk.itemId)
                                           LEFT JOIN item_unitWisePrice_data uwp ON uwp.itemId = COALESCE(bwi.itemId, bmk.itemId) AND uwp.unit = COALESCE(bwi.unit, bmk.unit) AND uwp.menuCategoryId = '${process.env.BASE_MENU}'
                                           LEFT JOIN billing_billWiseTableNo_data bwtn ON bwtn.billId = bst.billId
-                                          LEFT JOIN billing_itemWiseAddon_data iwad ON iwad.iwbId = iwst.iwbId
+                                          LEFT JOIN (
+                                              SELECT iwaId, iwbId, addOnsId, 'Active' AS addonStatus FROM billing_itemWiseAddon_data
+                                              UNION ALL
+                                              SELECT m.madId AS iwaId, m.iwbId, m.addOnsId, 'deleted' AS addonStatus
+                                              FROM billing_modifiedAddons_data AS m
+                                          ) AS iwad ON iwad.iwbId = iwst.iwbId
                                           LEFT JOIN item_addons_data iad ON iad.addonsId = iwad.addOnsId
                                           WHERE bst.billId = '${billId}'
-                                          ORDER BY bst.creationDate DESC, bst.subTokenNumber DESC;
-`
+                                          ORDER BY bst.creationDate DESC, bst.subTokenNumber DESC`;
             pool.query(sql_queries_getDetails, (err, data) => {
                 if (err) {
                     console.error("An error occurred in SQL Queery", err);
@@ -243,15 +248,17 @@ const getSubTokensByBillId = async (req, res) => {
                             token.items.push(item);
                         }
 
-                        // Add addon only when exists
+                        // Add addon only when exists (key by iwaId so Active + deleted rows for same addOnsId both appear)
                         if (row.addOnsId) {
-                            item.addons[row.addOnsId] = {
+                            const addonKey = row.iwaId || `${row.addOnsId}_${row.addonStatus || 'row'}`;
+                            item.addons[addonKey] = {
                                 iwaId: row.iwaId,
                                 iwbId: row.iwbId,
                                 addOnsId: row.addOnsId,
                                 addonsName: row.addonsName,
                                 addonsGujaratiName: row.addonsGujaratiName,
-                                addonPrice: row.addonPrice
+                                addonPrice: row.addonPrice,
+                                addonStatus: row.addonStatus
                             };
                         }
 
@@ -998,7 +1005,7 @@ const updateSubTokenDataById = (req, res) => {
                                                     const oldResult = groupItemsWithAddons(oldJson);
                                                     const json1 = Object.values(JSON.parse(JSON.stringify(oldResult)));
                                                     const json2 = Object.values(JSON.parse(JSON.stringify(billData.itemsData)));
-                                                    console.log("111", json1, "222", json2)
+
                                                     const { added, removed, modified } = compareJson(json1, json2);
 
                                                     if (added.length || removed.length || modified.length) {
@@ -1222,9 +1229,28 @@ const printTableBill = (req, res) => {
 
                         const billId = req.query.billId;
                         const currentDate = getCurrentDate();
-                        const currentDateMD = `DATE_FORMAT(STR_TO_DATE('${currentDate}', '%b %d %Y'), '%m-%d')`;
+                        const resetStartDateExpr = `STR_TO_DATE(
+                                                        CONCAT(
+                                                            CASE
+                                                                WHEN DATE(STR_TO_DATE('${currentDate}', '%b %d %Y')) < STR_TO_DATE(
+                                                                    CONCAT(YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y')), '-', frm.resetDate),
+                                                                    '%Y-%m-%d'
+                                                                )
+                                                                THEN YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y')) - 1
+                                                                ELSE YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y'))
+                                                            END,
+                                                            '-',
+                                                            frm.resetDate
+                                                        ),
+                                                        '%Y-%m-%d'
+                                                    )`;
                         let sql_query_chkOfficial = `SELECT billId, billNumber FROM billing_Official_data WHERE billId = '${billId}';
-                                                     SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS officialLastBillNo FROM billing_Official_data bod CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') LIMIT 1) AS frm WHERE bod.firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bod.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bod.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE;`;
+                                                     SELECT COALESCE(MAX(bod.billNumber), 0) AS officialLastBillNo
+                                                     FROM billing_Official_data bod
+                                                     CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') LIMIT 1) AS frm
+                                                     WHERE bod.firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}')
+                                                     AND bod.billDate >= ${resetStartDateExpr}
+                                                     FOR UPDATE;`;
                         connection.query(sql_query_chkOfficial, (err, chkExist) => {
                             if (err) {
                                 console.error("Error check official bill exist or not:", err);
@@ -1348,12 +1374,12 @@ const printTableBill = (req, res) => {
                                         let sql_query_getSubTokens = `SELECT subTokenNumber FROM billing_subToken_data WHERE billId = '${billId}'`;
 
                                         const sql_query_getBillData = `${sql_query_getBillingData};
-                                                   ${sql_query_getBillwiseItem};
-                                                   ${sql_query_getFirmData};
-                                                   ${sql_query_getItemWiseAddons};
-                                                   ${sql_query_getCustomerInfo};
-                                                   ${sql_query_getTableData};
-                                                   ${sql_query_getSubTokens}`;
+                                                                       ${sql_query_getBillwiseItem};
+                                                                       ${sql_query_getFirmData};
+                                                                       ${sql_query_getItemWiseAddons};
+                                                                       ${sql_query_getCustomerInfo};
+                                                                       ${sql_query_getTableData};
+                                                                       ${sql_query_getSubTokens}`;
 
                                         let sql_query_updateTableStatus = `UPDATE billing_data SET billStatus = 'print' WHERE billId = '${billId}'`;
                                         let sql_query_updatePrintDateTime = `UPDATE billing_billWiseTableNo_data SET printTime = NOW() WHERE billId = '${billId}'`;
@@ -1474,11 +1500,35 @@ const updateDineInBillData = (req, res) => {
                                 return res.status(404).send('Please Fill All The Fields..!');
                             })
                         } else {
-                            const currentDateMD = `DATE_FORMAT(STR_TO_DATE('${currentDate}', '%b %d %Y'), '%m-%d')`;
+                            const resetStartDateExpr = `STR_TO_DATE(
+                                                            CONCAT(
+                                                                CASE
+                                                                    WHEN DATE(STR_TO_DATE('${currentDate}', '%b %d %Y')) < STR_TO_DATE(
+                                                                        CONCAT(YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y')), '-', frm.resetDate),
+                                                                        '%Y-%m-%d'
+                                                                    )
+                                                                    THEN YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y')) - 1
+                                                                    ELSE YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y'))
+                                                                END,
+                                                                '-',
+                                                                frm.resetDate
+                                                            ),
+                                                            '%Y-%m-%d'
+                                                        )`;
                             let sql_query_chkOfficial = `SELECT billId, billNumber FROM billing_Official_data WHERE billId = '${billData.billId}';
                                                          SELECT billId, billNumber FROM billing_Complimentary_data WHERE billId = '${billData.billId}';
-                                                         SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS officialLastBillNo FROM billing_Official_data bod CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm WHERE bod.firmId = '${billData.firmId}' AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bod.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bod.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE;
-                                                         SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS complimentaryLastBillNo FROM billing_Complimentary_data bcd CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm WHERE bcd.firmId = '${billData.firmId}' AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bcd.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bcd.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE;
+                                                         SELECT COALESCE(MAX(bod.billNumber), 0) AS officialLastBillNo
+                                                         FROM billing_Official_data bod
+                                                         CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm
+                                                         WHERE bod.firmId = '${billData.firmId}'
+                                                         AND bod.billDate >= ${resetStartDateExpr}
+                                                         FOR UPDATE;
+                                                         SELECT COALESCE(MAX(bcd.billNumber), 0) AS complimentaryLastBillNo
+                                                         FROM billing_Complimentary_data bcd
+                                                         CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = '${billData.firmId}' LIMIT 1) AS frm
+                                                         WHERE bcd.firmId = '${billData.firmId}'
+                                                         AND bcd.billDate >= ${resetStartDateExpr}
+                                                         FOR UPDATE;
                                                          SELECT isFixed FROM billing_DineInTable_data WHERE tableNo = '${billData.tableNo}' AND billId = '${billData.billId}'`;
                             connection.query(sql_query_chkOfficial, (err, chkExist) => {
                                 if (err) {
@@ -2244,11 +2294,35 @@ const sattledBillDataByID = (req, res) => {
                                 return res.status(404).send('Please Fill All The Fields..!');
                             })
                         } else {
-                            const currentDateMD = `DATE_FORMAT(STR_TO_DATE('${currentDate}', '%b %d %Y'), '%m-%d')`;
+                            const resetStartDateExpr = `STR_TO_DATE(
+                                                            CONCAT(
+                                                                CASE
+                                                                    WHEN DATE(STR_TO_DATE('${currentDate}', '%b %d %Y')) < STR_TO_DATE(
+                                                                        CONCAT(YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y')), '-', frm.resetDate),
+                                                                        '%Y-%m-%d'
+                                                                    )
+                                                                    THEN YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y')) - 1
+                                                                    ELSE YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y'))
+                                                                END,
+                                                                '-',
+                                                                frm.resetDate
+                                                            ),
+                                                            '%Y-%m-%d'
+                                                        )`;
                             let sql_query_chkOfficial = `SELECT billId, billNumber FROM billing_Official_data WHERE billId = '${billData.billId}';
                                                          SELECT billId, billNumber FROM billing_Complimentary_data WHERE billId = '${billData.billId}';
-                                                         SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS officialLastBillNo FROM billing_Official_data bod CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') LIMIT 1) AS frm WHERE bod.firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bod.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bod.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE;
-                                                         SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS complimentaryLastBillNo FROM billing_Complimentary_data bcd CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') LIMIT 1) AS frm WHERE bcd.firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bcd.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bcd.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE;
+                                                         SELECT COALESCE(MAX(bod.billNumber), 0) AS officialLastBillNo
+                                                         FROM billing_Official_data bod
+                                                         CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') LIMIT 1) AS frm
+                                                         WHERE bod.firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}')
+                                                         AND bod.billDate >= ${resetStartDateExpr}
+                                                         FOR UPDATE;
+                                                         SELECT COALESCE(MAX(bcd.billNumber), 0) AS complimentaryLastBillNo
+                                                         FROM billing_Complimentary_data bcd
+                                                         CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') LIMIT 1) AS frm
+                                                         WHERE bcd.firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}')
+                                                         AND bcd.billDate >= ${resetStartDateExpr}
+                                                         FOR UPDATE;
                                                          SELECT isFixed FROM billing_DineInTable_data WHERE tableNo = '${billData.tableNo}' AND billId = '${billData.billId}'`;
                             connection.query(sql_query_chkOfficial, (err, chkExist) => {
                                 if (err) {
@@ -2561,11 +2635,35 @@ const updateBillDataWithPrintByID = (req, res) => {
                                 return res.status(404).send('Please Fill All The Fields..!');
                             })
                         } else {
-                            const currentDateMD = `DATE_FORMAT(STR_TO_DATE('${currentDate}', '%b %d %Y'), '%m-%d')`;
+                            const resetStartDateExpr = `STR_TO_DATE(
+                                                            CONCAT(
+                                                                CASE
+                                                                    WHEN DATE(STR_TO_DATE('${currentDate}', '%b %d %Y')) < STR_TO_DATE(
+                                                                        CONCAT(YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y')), '-', frm.resetDate),
+                                                                        '%Y-%m-%d'
+                                                                    )
+                                                                    THEN YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y')) - 1
+                                                                    ELSE YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y'))
+                                                                END,
+                                                                '-',
+                                                                frm.resetDate
+                                                            ),
+                                                            '%Y-%m-%d'
+                                                        )`;
                             let sql_query_chkOfficial = `SELECT billId, billNumber FROM billing_Official_data WHERE billId = '${billData.billId}';
                                                          SELECT billId, billNumber FROM billing_Complimentary_data WHERE billId = '${billData.billId}';
-                                                         SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS officialLastBillNo FROM billing_Official_data bod CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') LIMIT 1) AS frm WHERE bod.firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bod.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bod.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE;
-                                                         SELECT IF(COUNT(*) = 0, 0, MAX(billNumber)) AS complimentaryLastBillNo FROM billing_Complimentary_data bcd CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') LIMIT 1) AS frm WHERE bcd.firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') AND (${currentDateMD} < frm.resetDate OR (${currentDateMD} >= frm.resetDate AND DATE_FORMAT(bcd.billDate, '%m-%d') >= frm.resetDate AND DATE_FORMAT(bcd.billCreationDate, '%m-%d') >= frm.resetDate)) FOR UPDATE`;
+                                                         SELECT COALESCE(MAX(bod.billNumber), 0) AS officialLastBillNo
+                                                         FROM billing_Official_data bod
+                                                         CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') LIMIT 1) AS frm
+                                                         WHERE bod.firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}')
+                                                         AND bod.billDate >= ${resetStartDateExpr}
+                                                         FOR UPDATE;
+                                                         SELECT COALESCE(MAX(bcd.billNumber), 0) AS complimentaryLastBillNo
+                                                         FROM billing_Complimentary_data bcd
+                                                         CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') LIMIT 1) AS frm
+                                                         WHERE bcd.firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}')
+                                                         AND bcd.billDate >= ${resetStartDateExpr}
+                                                         FOR UPDATE`;
                             connection.query(sql_query_chkOfficial, (err, chkExist) => {
                                 if (err) {
                                     console.error("Error check official bill exist or not:", err);

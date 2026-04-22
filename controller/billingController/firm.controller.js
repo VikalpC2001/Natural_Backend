@@ -928,7 +928,7 @@ const getBusinessReportDayWiseByFirmId = (req, res) => {
                                            SELECT
                                                DATE(bod.billDate) AS bill_date,
                                                SUM(CASE WHEN bod.billType = 'Pick Up' THEN bod.settledAmount ELSE 0 END) AS pickup_data,
-                                               SUM(CASE WHEN bod.billType = 'Delivery' THEN bod.settledAmount ELSE 0 END) AS delivery_data
+                                               SUM(CASE WHEN bod.billType = 'Dine In' THEN bod.settledAmount ELSE 0 END) AS dineIn_data
                                            FROM billing_Official_data bod
                                            WHERE bod.firmId = '${data.firmId}' AND bod.billPayType NOT IN ('cancel','complimentary') AND bod.billDate BETWEEN STR_TO_DATE('${data.startDate ? data.startDate : firstDay}', '%b %d %Y') AND STR_TO_DATE('${data.endDate ? data.endDate : lastDay}', '%b %d %Y')
                                            GROUP BY DATE(bod.billDate)
@@ -936,7 +936,7 @@ const getBusinessReportDayWiseByFirmId = (req, res) => {
                                        SELECT
                                            DATE_FORMAT(dr.day_date, '%d-%m-%Y') AS Day,
                                            COALESCE(dt.pickup_data, 0) AS 'Pickup Data',
-                                           COALESCE(dt.delivery_data, 0) AS 'Delivery Data',
+                                           COALESCE(dt.dineIn_data, 0) AS 'Dine In Data',
                                            COALESCE(dt.pickup_data, 0) + COALESCE(dt.delivery_data, 0) AS Total
                                        FROM date_range dr
                                        LEFT JOIN daily_totals dt ON dt.bill_date = dr.day_date
@@ -960,12 +960,12 @@ const getBusinessReportDayWiseByFirmId = (req, res) => {
                     const keys = Object.keys(reportData[0]);
                     const sumFooter = reportData.reduce((acc, item) => ({
                         pickup: acc.pickup + parseFloat(item['Pickup Data'] || 0),
-                        delivery: acc.delivery + parseFloat(item['Delivery Data'] || 0),
+                        dineIn: acc.dineIn + parseFloat(item['Dine In Data'] || 0),
                         total: acc.total + parseFloat(item.Total || 0)
-                    }), { pickup: 0, delivery: 0, total: 0 });
+                    }), { pickup: 0, dineIn: 0, total: 0 });
                     const sumFooterArray = ['Total', ...keys.map(key => {
                         if (key === 'Pickup Data') return sumFooter.pickup.toFixed(2);
-                        if (key === 'Delivery Data') return sumFooter.delivery.toFixed(2);
+                        if (key === 'Dine In Data') return sumFooter.dineIn.toFixed(2);
                         if (key === 'Total') return sumFooter.total.toFixed(2);
                         return '';
                     })];
