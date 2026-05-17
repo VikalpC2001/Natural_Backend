@@ -761,10 +761,17 @@ const removeSubTokenDataById = (req, res) => {
                                                         let modifiedId = `CONCAT('modified_',${Date.now()} + ROW_NUMBER() OVER (ORDER BY (SELECT NULL)),'_',ROW_NUMBER() OVER (ORDER BY (SELECT NULL)))`;
 
                                                         let sql_query_removeSubToken = `INSERT INTO billing_modifiedKot_data(modifiedId, iwbId, itemId, qty, unit, itemPrice, price, comment)
-                                                                                        SELECT ${modifiedId}, iwbId, itemId, qty, unit, itemPrice, price, comment FROM billing_billWiseItem_data WHERE iwbId IN (SELECT COALESCE(billing_itemWiseSubToken_data.iwbId,NULL) FROM billing_itemWiseSubToken_data WHERE billing_itemWiseSubToken_data.subTokenId = '${subTokenId}');
-                                                                                        UPDATE billing_itemWiseSubToken_data SET itemStatus = 'cancelled' WHERE billing_itemWiseSubToken_data.subTokenId = '${subTokenId}';
+                                                                                        SELECT ${modifiedId}, bwi.iwbId, bwi.itemId, bwi.qty, bwi.unit, bwi.itemPrice, bwi.price, bwi.comment
+                                                                                        FROM billing_billWiseItem_data AS bwi
+                                                                                        INNER JOIN billing_itemWiseSubToken_data AS iwst_del ON iwst_del.iwbId = bwi.iwbId AND iwst_del.subTokenId = '${subTokenId}';
+                                                                                        INSERT INTO billing_modifiedAddons_data(madId, iwbId, addOnsId)
+                                                                                        SELECT CONCAT('mad_', iwad_src.iwaId), iwad_src.iwbId, iwad_src.addOnsId
+                                                                                        FROM billing_itemWiseAddon_data AS iwad_src
+                                                                                        INNER JOIN billing_itemWiseSubToken_data AS iwst_a ON iwst_a.iwbId = iwad_src.iwbId AND iwst_a.subTokenId = '${subTokenId}';
+                                                                                        UPDATE billing_itemWiseSubToken_data SET itemStatus = 'cancelled' WHERE subTokenId = '${subTokenId}';
                                                                                         UPDATE billing_subToken_data SET tokenStatus = 'cancelled', captain = '${cashier}' WHERE subTokenId = '${subTokenId}';
-                                                                                        DELETE FROM billing_billWiseItem_data WHERE iwbId IN (SELECT COALESCE(billing_itemWiseSubToken_data.iwbId,NULL) FROM billing_itemWiseSubToken_data WHERE billing_itemWiseSubToken_data.subTokenId = '${subTokenId}')`;
+                                                                                        DELETE bwi FROM billing_billWiseItem_data AS bwi
+                                                                                        INNER JOIN billing_itemWiseSubToken_data AS iwst_d ON iwst_d.iwbId = bwi.iwbId AND iwst_d.subTokenId = '${subTokenId}'`;
                                                         connection.query(sql_query_removeSubToken, (err) => {
                                                             if (err) {
                                                                 console.error("Error Delete Sub Token Item Data:", err);

@@ -1177,7 +1177,7 @@ const removeSubTokenDataByIdForApp = (req, res) => {
                                 return res.status(404).send('Please Fill All The Fields..!');
                             })
                         } else {
-                            let sql_query_getAdminId = `SELECT adminMacAddress FROM billing_admin_data`;
+                            let sql_query_getAdminId = `SELECT adminMacAddress FROM billing_admin_data LIMIT 1`;
                             connection.query(sql_query_getAdminId, (err, macId) => {
                                 if (err) {
                                     console.error("Error Get Pre Total Price:", err);
@@ -1226,13 +1226,19 @@ const removeSubTokenDataByIdForApp = (req, res) => {
                                                                     });
                                                                 } else {
                                                                     let modifiedId = `CONCAT('modified_',${Date.now()} + ROW_NUMBER() OVER (ORDER BY (SELECT NULL)),'_',ROW_NUMBER() OVER (ORDER BY (SELECT NULL)))`;
+                                                                    const subTokenIwbIds = `(SELECT iwst_x.iwbId FROM billing_itemWiseSubToken_data AS iwst_x WHERE iwst_x.subTokenId = '${subTokenId}' AND iwst_x.iwbId IS NOT NULL)`;
                                                                     let sql_query_removeSubToken = `INSERT INTO billing_modifiedKot_data(modifiedId, iwbId, itemId, qty, unit, itemPrice, price, comment)
-                                                                                                    SELECT ${modifiedId}, iwbId, itemId, qty, unit, itemPrice, price, comment FROM billing_billWiseItem_data WHERE iwbId IN (SELECT COALESCE(billing_itemWiseSubToken_data.iwbId,NULL) FROM billing_itemWiseSubToken_data WHERE billing_itemWiseSubToken_data.subTokenId = '${subTokenId}');
+                                                                                                    SELECT ${modifiedId}, bwi.iwbId, bwi.itemId, bwi.qty, bwi.unit, bwi.itemPrice, bwi.price, bwi.comment
+                                                                                                    FROM billing_billWiseItem_data AS bwi
+                                                                                                    INNER JOIN billing_itemWiseSubToken_data AS iwst_del ON iwst_del.iwbId = bwi.iwbId AND iwst_del.subTokenId = '${subTokenId}';
                                                                                                     INSERT INTO billing_modifiedAddons_data(madId, iwbId, addOnsId)
-                                                                                                    SELECT CONCAT('mad_', iwaId), iwbId, addOnsId FROM billing_itemWiseAddon_data WHERE iwbId IN (SELECT COALESCE(billing_itemWiseSubToken_data.iwbId,NULL) FROM billing_itemWiseSubToken_data WHERE billing_itemWiseSubToken_data.subTokenId = '${subTokenId}');
-                                                                                                    UPDATE billing_itemWiseSubToken_data SET itemStatus = 'cancelled' WHERE billing_itemWiseSubToken_data.subTokenId = '${subTokenId}';
+                                                                                                    SELECT CONCAT('mad_', iwad_src.iwaId), iwad_src.iwbId, iwad_src.addOnsId
+                                                                                                    FROM billing_itemWiseAddon_data AS iwad_src
+                                                                                                    INNER JOIN billing_itemWiseSubToken_data AS iwst_a ON iwst_a.iwbId = iwad_src.iwbId AND iwst_a.subTokenId = '${subTokenId}';
+                                                                                                    UPDATE billing_itemWiseSubToken_data SET itemStatus = 'cancelled' WHERE subTokenId = '${subTokenId}';
                                                                                                     UPDATE billing_subToken_data SET tokenStatus = 'cancelled', captain = '${cashier}' WHERE subTokenId = '${subTokenId}';
-                                                                                                    DELETE FROM billing_billWiseItem_data WHERE iwbId IN (SELECT COALESCE(billing_itemWiseSubToken_data.iwbId,NULL) FROM billing_itemWiseSubToken_data WHERE billing_itemWiseSubToken_data.subTokenId = '${subTokenId}')`;
+                                                                                                    DELETE bwi FROM billing_billWiseItem_data AS bwi
+                                                                                                    INNER JOIN billing_itemWiseSubToken_data AS iwst_d ON iwst_d.iwbId = bwi.iwbId AND iwst_d.subTokenId = '${subTokenId}'`;
                                                                     connection.query(sql_query_removeSubToken, (err) => {
                                                                         if (err) {
                                                                             console.error("Error Delete Sub Token Item Data:", err);
@@ -1276,10 +1282,12 @@ const removeSubTokenDataByIdForApp = (req, res) => {
                                                                                                                 LEFT JOIN billing_billWiseTableNo_data AS bwtn ON bwtn.billId = bst.billId
                                                                                                                 LEFT JOIN (
                                                                                                                     SELECT iwaId, iwbId, addOnsId FROM billing_itemWiseAddon_data
+                                                                                                                    WHERE iwbId IN ${subTokenIwbIds}
                                                                                                                     UNION ALL
                                                                                                                     SELECT m.madId AS iwaId, m.iwbId, m.addOnsId
                                                                                                                     FROM billing_modifiedAddons_data AS m
-                                                                                                                    WHERE NOT EXISTS (
+                                                                                                                    WHERE m.iwbId IN ${subTokenIwbIds}
+                                                                                                                    AND NOT EXISTS (
                                                                                                                         SELECT 1 FROM billing_itemWiseAddon_data AS l
                                                                                                                         WHERE l.iwbId = m.iwbId AND l.addOnsId = m.addOnsId
                                                                                                                     )
@@ -1805,6 +1813,449 @@ const findServerIpByApp = (req, res) => {
     }
 }
 
+// Sattled Bill Data After Print By App
+
+const sattledBillDataByIDForApp = (req, res) => {
+    pool2.getConnection((err, connection) => {
+        if (err) {
+            console.error("Error getting database connection:", err);
+            return res.status(500).send('Database Error');
+        }
+        try {
+            connection.beginTransaction((err) => {
+                if (err) {
+                    console.error("Error beginning transaction:", err);
+                    connection.release();
+                    return res.status(500).send('Database Error');
+                } else {
+                    let token;
+                    token = req.headers ? req.headers.authorization.split(" ")[1] : null;
+                    if (token) {
+                        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+                        const cashier = decoded.id.firstName;
+                        const branchId = decoded.id.branchId;
+
+                        const currentDate = getCurrentDate();
+                        const billData = req.body;
+
+                        console.log(billData);
+
+                        const isComplimentary = billData.billPayType == 'complimentary' ? true : false;
+
+                        if (!billData.billId || !billData.settledAmount || !billData.billPayType || !billData.billStatus || !billData.tableNo) {
+                            connection.rollback(() => {
+                                connection.release();
+                                return res.status(404).send('Please Fill All The Fields..!');
+                            })
+                        } else {
+                            const resetStartDateExpr = `STR_TO_DATE(
+                                                            CONCAT(
+                                                                CASE
+                                                                    WHEN DATE(STR_TO_DATE('${currentDate}', '%b %d %Y')) < STR_TO_DATE(
+                                                                        CONCAT(YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y')), '-', frm.resetDate),
+                                                                        '%Y-%m-%d'
+                                                                    )
+                                                                    THEN YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y')) - 1
+                                                                    ELSE YEAR(STR_TO_DATE('${currentDate}', '%b %d %Y'))
+                                                                END,
+                                                                '-',
+                                                                frm.resetDate
+                                                            ),
+                                                            '%Y-%m-%d'
+                                                        )`;
+                            let sql_query_chkOfficial = `SELECT isOfficial FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}';
+                                                         SELECT billId, billNumber FROM billing_Official_data WHERE billId = '${billData.billId}';
+                                                         SELECT billId, billNumber FROM billing_Complimentary_data WHERE billId = '${billData.billId}';
+                                                         SELECT COALESCE(MAX(bod.billNumber), 0) AS officialLastBillNo
+                                                         FROM billing_Official_data bod
+                                                         CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') LIMIT 1) AS frm
+                                                         WHERE bod.firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}')
+                                                         AND bod.billDate >= ${resetStartDateExpr}
+                                                         FOR UPDATE;
+                                                         SELECT COALESCE(MAX(bcd.billNumber), 0) AS complimentaryLastBillNo
+                                                         FROM billing_Complimentary_data bcd
+                                                         CROSS JOIN (SELECT COALESCE(resetDate, '04-01') AS resetDate FROM billing_firm_data WHERE firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}') LIMIT 1) AS frm
+                                                         WHERE bcd.firmId = (SELECT firmId FROM billing_branchWiseCategory_data WHERE categoryId = 'dineIn' AND branchId = '${branchId}')
+                                                         AND bcd.billDate >= ${resetStartDateExpr}
+                                                         FOR UPDATE;
+                                                         SELECT isFixed FROM billing_DineInTable_data WHERE tableNo = '${billData.tableNo}' AND billId = '${billData.billId}'`;
+                            connection.query(sql_query_chkOfficial, (err, chkExist) => {
+                                if (err) {
+                                    console.error("Error check official bill exist or not:", err);
+                                    connection.rollback(() => {
+                                        connection.release();
+                                        return res.status(500).send('Database Error');
+                                    });
+                                } else {
+                                    const isOfficial = chkExist && chkExist[0].length && chkExist[0][0].isOfficial ? chkExist[0][0].isOfficial : false;
+                                    const isExist = isComplimentary ? (chkExist && chkExist[2].length ? true : false) : (chkExist && chkExist[1].length ? true : false);
+                                    const officialLastBillNo = chkExist && chkExist[3] ? chkExist[3][0].officialLastBillNo : 0;
+                                    const complimentaryLastBillNo = chkExist && chkExist[4] ? chkExist[4][0].complimentaryLastBillNo : 0;
+                                    const nextOfficialBillNo = officialLastBillNo + 1;
+                                    const nextComplimentaryBillNo = complimentaryLastBillNo + 1;
+                                    const isTableFixed = chkExist && chkExist[5].length ? chkExist[5][0].isFixed : true;
+                                    let sql_query_getBillInfo = `SELECT
+                                                                     bd.billId AS billId
+                                                                 FROM
+                                                                     billing_data AS bd
+                                                                 WHERE bd.billId = '${billData.billId}' AND bd.billType = 'Dine In'`;
+                                    connection.query(sql_query_getBillInfo, (err, billInfo) => {
+                                        if (err) {
+                                            console.error("Error inserting new bill number:", err);
+                                            connection.rollback(() => {
+                                                connection.release();
+                                                return res.status(500).send('Database Error');
+                                            });
+                                        } else {
+                                            if (billInfo && billInfo.length) {
+                                                const uid1 = new Date();
+                                                const bwuId = String("bwu_" + uid1.getTime());
+                                                const dabId = String("dab_" + uid1.getTime());
+
+                                                let updateColumnField = `billPayType = '${billData.billPayType}',
+                                                                         discountType = '${billData.discountType}',
+                                                                         discountValue = ${billData.discountValue},
+                                                                         totalDiscount = ${billData.totalDiscount},
+                                                                         settledAmount = ${billData.settledAmount},
+                                                                         billStatus = '${billData.billStatus}'`;
+
+                                                let updateItemColumnField = `billPayType = '${billData.billPayType}',
+                                                                             billStatus = '${billData.billStatus}'`;
+
+                                                let sql_querry_updateBillInfo = `UPDATE billing_data SET ${updateColumnField} WHERE billId = '${billData.billId}';
+                                                                                 UPDATE billing_billWiseItem_data SET ${updateItemColumnField} WHERE billId = '${billData.billId}';
+                                                        ${!isExist && isOfficial && !isComplimentary
+                                                        ?
+                                                        `INSERT INTO billing_Official_data(billId, billNumber, firmId, branchId, cashier, menuStatus, billType, billPayType, discountType, discountValue, totalDiscount, totalAmount, settledAmount, billComment, billDate, billStatus)
+                                                         SELECT billId, ${nextOfficialBillNo}, firmId, '${branchId}', cashier, menuStatus, billType, '${billData.billPayType}', '${billData.discountType}', ${billData.discountValue}, ${billData.totalDiscount}, totalAmount, ${billData.settledAmount}, billComment, billDate, '${billData.billStatus}' FROM billing_data WHERE billId = '${billData.billId}'`
+                                                        :
+                                                        !isExist && isComplimentary
+                                                            ?
+                                                            `INSERT INTO billing_Complimentary_data(billId, billNumber, firmId, branchId, cashier, menuStatus, billType, billPayType, discountType, discountValue, totalDiscount, totalAmount, settledAmount, billComment, billDate, billStatus)
+                                                         SELECT billId, ${nextComplimentaryBillNo}, firmId, '${branchId}', cashier, menuStatus, billType, '${billData.billPayType}', '${billData.discountType}', ${billData.discountValue}, ${billData.totalDiscount}, totalAmount, ${billData.settledAmount}, billComment, billDate, '${billData.billStatus}' FROM billing_data WHERE billId = '${billData.billId}'`
+                                                            :
+                                                            `UPDATE billing_Official_data SET ${updateColumnField} WHERE billId = '${billData.billId}'`};
+                                                         UPDATE billing_Complimentary_data SET ${updateColumnField} WHERE billId = '${billData.billId}'`;
+
+                                                connection.query(sql_querry_updateBillInfo, (err) => {
+                                                    if (err) {
+                                                        console.error("Error inserting new bill number:", err);
+                                                        connection.rollback(() => {
+                                                            connection.release();
+                                                            return res.status(500).send('Database Error');
+                                                        });
+                                                    } else {
+                                                        let sql_query_sattledData = `${['complete', 'Cancel'].includes(billData.billStatus)
+                                                            ? isTableFixed == true
+                                                                ?
+                                                                `UPDATE billing_DineInTable_data SET billId = null WHERE tableNo = '${billData.tableNo}' AND billId = '${billData.billId}';`
+                                                                :
+                                                                `DELETE FROM billing_DineInTable_data WHERE billId = '${billData.billId}' AND tableNo = '${billData.tableNo}';`
+                                                            : ''}
+                                                                DELETE FROM billing_billWiseUpi_data WHERE billId = '${billData.billId}';
+                                                                ${billData.billPayType == 'online' && billData.onlineId && billData.onlineId != 'other'
+                                                                ?
+                                                                `INSERT INTO billing_billWiseUpi_data(bwuId, onlineId, billId, amount, onlineDate)
+                                                                 VALUES('${bwuId}', '${billData.onlineId}', '${billData.billId}', '${billData.settledAmount}', STR_TO_DATE('${currentDate}','%b %d %Y'))`
+                                                                :
+                                                                ''}`;
+                                                        connection.query(sql_query_sattledData, (err) => {
+                                                            if (err) {
+                                                                console.error("Error in sattled Data:", err);
+                                                                connection.rollback(() => {
+                                                                    connection.release();
+                                                                    return res.status(500).send('Database Error');
+                                                                });
+                                                            } else {
+                                                                let sql_query_getBillingData = `SELECT 
+                                                                                                    bd.billId AS billId, 
+                                                                                                    bd.billNumber AS billNumber,
+                                                                                                    COALESCE(bod.billNumber, CONCAT('C', bcd.billNumber), 'Not Available') AS officialBillNo,
+                                                                                                    CASE
+                                                                                                        WHEN bd.billType = 'Pick Up' THEN CONCAT('P',btd.tokenNo)
+                                                                                                        WHEN bd.billType = 'Delivery' THEN CONCAT('D',btd.tokenNo)
+                                                                                                        WHEN bd.billType = 'Dine In' THEN CONCAT('R',btd.tokenNo)
+                                                                                                        ELSE NULL
+                                                                                                    END AS tokenNo,
+                                                                                                    bwu.onlineId AS onlineId,
+                                                                                                    boud.holderName AS holderName,
+                                                                                                    boud.upiId AS upiId,
+                                                                                                    bd.firmId AS firmId, 
+                                                                                                    bd.cashier AS cashier, 
+                                                                                                    bd.menuStatus AS menuStatus, 
+                                                                                                    bd.billType AS billType, 
+                                                                                                    bd.billPayType AS billPayType, 
+                                                                                                    bd.discountType AS discountType, 
+                                                                                                    bd.discountValue AS discountValue, 
+                                                                                                    bd.totalDiscount AS totalDiscount, 
+                                                                                                    bd.totalAmount AS subTotal, 
+                                                                                                    bd.settledAmount AS settledAmount, 
+                                                                                                    bd.billComment AS billComment, 
+                                                                                                    DATE_FORMAT(bd.billDate,'%d/%m/%Y') AS billDate,
+                                                                                                    bd.billStatus AS billStatus,
+                                                                                                    DATE_FORMAT(bd.billCreationDate,'%h:%i %p') AS billTime,
+                                                                                                    bwcd.billFooterNote AS footerBill,
+                                                                                                    bwcd.appriciateLine AS appriciateLine
+                                                                                                FROM 
+                                                                                                    billing_data AS bd
+                                                                                                LEFT JOIN billing_Official_data AS bod ON bod.billId = bd.billId
+                                                                                                LEFT JOIN billing_Complimentary_data AS bcd ON bcd.billId = bd.billId
+                                                                                                LEFT JOIN billing_token_data AS btd ON btd.billId = bd.billId
+                                                                                                LEFT JOIN billing_firm_data AS bfd ON bfd.firmId = bd.firmId
+                                                                                                LEFT JOIN billing_billWiseUpi_data AS bwu ON bwu.billId = bd.billId
+                                                                                                LEFT JOIN billing_onlineUPI_data AS boud ON boud.onlineId = bwu.onlineId
+                                                                                                LEFT JOIN billing_category_data AS bcgd ON bcgd.categoryName = bd.billType
+                                                                                                LEFT JOIN billing_branchWiseCategory_data AS bwcd ON bwcd.categoryId = bcgd.categoryId
+                                                                                                WHERE bd.billId = '${billData.billId}'`;
+                                                                let sql_query_getBillwiseItem = `SELECT
+                                                                                                     bwid.iwbId AS iwbId,
+                                                                                                     bwid.itemId AS itemId,
+                                                                                                     imd.itemName AS itemName,
+                                                                                                     imd.itemCode AS inputCode,
+                                                                                                     SUM(bwid.qty) AS qty,
+                                                                                                     bwid.unit AS unit,
+                                                                                                     bwid.itemPrice AS itemPrice,
+                                                                                                     SUM(bwid.price) AS price,
+                                                                                                     bwid.comment AS comment
+                                                                                                 FROM
+                                                                                                     billing_billWiseItem_data AS bwid
+                                                                                                 INNER JOIN item_menuList_data AS imd ON imd.itemId = bwid.itemId
+                                                                                                 WHERE bwid.billId = '${billData.billId}'
+                                                                                                 GROUP BY bwid.itemId, bwid.unit`;
+                                                                let sql_query_getItemWiseAddons = `SELECT
+                                                                                                       iwad.iwaId AS iwaId,
+                                                                                                       iwad.iwbId AS iwbId,
+                                                                                                       iwad.addOnsId AS addOnsId,
+                                                                                                       iad.addonsName AS addonsName,
+                                                                                                       iad.addonsGujaratiName AS addonsGujaratiName,
+                                                                                                       iad.price AS addonPrice
+                                                                                                   FROM
+                                                                                                       billing_itemWiseAddon_data AS iwad
+                                                                                                   LEFT JOIN item_addons_data AS iad ON iad.addonsId = iwad.addOnsId
+                                                                                                   WHERE iwad.iwbId IN(SELECT COALESCE(bwid.iwbId, NULL) FROM billing_billWiseItem_data AS bwid WHERE bwid.billId = '${billData.billId}')`;
+                                                                let sql_query_getCustomerInfo = `SELECT
+                                                                                                     bwcd.bwcId AS bwcId,
+                                                                                                     bwcd.customerId AS customerId,
+                                                                                                     bwcd.mobileNo AS mobileNo,
+                                                                                                     bwcd.addressId AS addressId,
+                                                                                                     bwcd.address AS address,
+                                                                                                     bwcd.locality AS locality,
+                                                                                                     bwcd.customerName AS customerName
+                                                                                                 FROM
+                                                                                                     billing_billWiseCustomer_data AS bwcd
+                                                                                                 WHERE bwcd.billId = '${billData.billId}'`;
+                                                                let sql_query_getFirmData = `SELECT 
+                                                                                                firmId, 
+                                                                                                firmName, 
+                                                                                                gstNumber, 
+                                                                                                firmAddress, 
+                                                                                                pincode, 
+                                                                                                firmMobileNo, 
+                                                                                                otherMobileNo 
+                                                                                             FROM 
+                                                                                                billing_firm_data 
+                                                                                             WHERE 
+                                                                                                firmId = (SELECT firmId FROM billing_data WHERE billId = '${billData.billId}')`;
+                                                                let sql_query_getTableData = `SELECT
+                                                                                                  bwtn.tableNo AS tableNo,
+                                                                                                  bwtn.areaId AS areaId,
+                                                                                                  bwtn.assignCaptain AS assignCaptain,
+                                                                                                  dia.areaName AS areaName,
+                                                                                                  IFNULL(CONCAT(dia.prefix, ' ', bwtn.tableNo), bwtn.tableNo) AS displayTableNo
+                                                                                                FROM
+                                                                                                  billing_billWiseTableNo_data AS bwtn
+                                                                                                LEFT JOIN billing_dineInArea_data dia ON dia.areaId = bwtn.areaId
+                                                                                                WHERE billId = '${billData.billId}'`;
+                                                                let sql_query_getSubTokens = `SELECT subTokenNumber FROM billing_subToken_data WHERE billId = '${billData.billId}'`;
+                                                                let sql_query_getAdminId = `SELECT adminMacAddress FROM billing_admin_data`;
+
+                                                                const sql_query_getBillData = `${sql_query_getBillingData};
+                                                                                               ${sql_query_getBillwiseItem};
+                                                                                               ${sql_query_getFirmData};
+                                                                                               ${sql_query_getItemWiseAddons};
+                                                                                               ${sql_query_getCustomerInfo};
+                                                                                               ${sql_query_getTableData};
+                                                                                               ${sql_query_getSubTokens};
+                                                                                               ${sql_query_getAdminId}`;
+                                                                connection.query(sql_query_getBillData, (err, rows) => {
+                                                                    if (err) {
+                                                                        console.error("Error inserting new bill number:", err);
+                                                                        connection.rollback(() => {
+                                                                            connection.release();
+                                                                            return res.status(500).send('Database Error');
+                                                                        });
+                                                                    } else {
+                                                                        const itemsData = rows && rows[1] ? rows[1] : [];
+                                                                        const addonsData = rows && rows[3] ? rows[3] : [];
+
+                                                                        const newItemJson = itemsData.map(item => {
+                                                                            const itemAddons = addonsData.filter(addon => addon.iwbId === item.iwbId);
+                                                                            return {
+                                                                                ...item,
+                                                                                addons: Object.fromEntries(itemAddons.map(addon => [addon.addOnsId, addon])),
+                                                                                addonPrice: itemAddons.reduce((sum, { price }) => sum + price, 0)
+                                                                            };
+                                                                        });
+                                                                        const json = {
+                                                                            ...rows[0][0],
+                                                                            itemsData: newItemJson,
+                                                                            firmData: rows && rows[2] ? rows[2][0] : [],
+                                                                            ...({ customerDetails: rows && rows[4] && rows[4][0] ? rows[4][0] : '' }),
+                                                                            ...(rows && rows[5] && rows[5][0] ? { tableInfo: rows[5][0] } : ''),
+                                                                            subTokens: rows && rows[6] && rows[6].length ? rows[6].map(item => item.subTokenNumber).sort((a, b) => a - b).join(", ") : null,
+                                                                            tableNo: rows && rows[5] && rows[5][0] ? rows[5][0].tableNo : 0,
+                                                                            ...(['online'].includes(rows[0][0].billPayType) ? {
+                                                                                "upiJson": {
+                                                                                    "onlineId": rows[0][0].onlineId,
+                                                                                    "holderName": rows[0][0].holderName,
+                                                                                    "upiId": rows[0][0].upiId
+                                                                                }
+                                                                            } : '')
+                                                                        }
+                                                                        connection.commit((err) => {
+                                                                            if (err) {
+                                                                                console.error("Error committing transaction:", err);
+                                                                                connection.rollback(() => {
+                                                                                    connection.release();
+                                                                                    return res.status(500).send('Database Error');
+                                                                                });
+                                                                            } else {
+                                                                                const macId = rows && rows[7] ? rows[7] : [];
+                                                                                if (macId && macId.length) {
+                                                                                    const adminMacAddress = macId[0].adminMacAddress;
+                                                                                    connection.release();
+                                                                                    req?.io?.emit('updateTableView');
+                                                                                    console.log("adminMacAddress", adminMacAddress, billData.isPrint);
+                                                                                    billData.isPrint && adminMacAddress && req?.io?.emit(`print_Bill_${adminMacAddress}`, json);
+                                                                                    return res.status(200).send(json);
+                                                                                } else {
+                                                                                    connection.release();
+                                                                                    return res.status(404).send('Main Server Not Found');
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                    }
+                                                                })
+                                                            }
+                                                        });
+                                                    }
+                                                });
+                                            } else {
+                                                connection.rollback(() => {
+                                                    connection.release();
+                                                    return res.status(404).send('billId Not Found...!');
+                                                })
+                                            }
+                                        }
+                                    })
+                                }
+                            })
+                        }
+                    } else {
+                        connection.rollback(() => {
+                            connection.release();
+                            return res.status(404).send('Please Login First....!');
+                        });
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('An error occurred', error);
+            connection.rollback(() => {
+                connection.release();
+                return res.status(500).json('Internal Server Error');
+            })
+        }
+    });
+}
+
+// Sattled Cancel Token Table
+
+const sattledCancelTokenTableByApp = (req, res) => {
+    pool2.getConnection((err, connection) => {
+        if (err) {
+            console.error("Error getting database connection:", err);
+            return res.status(500).send('Database Error');
+        }
+        try {
+            connection.beginTransaction((err) => {
+                if (err) {
+                    console.error("Error beginning transaction:", err);
+                    connection.release();
+                    return res.status(500).send('Database Error');
+                } else {
+                    const billId = req.query.billId;
+                    let sql_query_chkIsFixed = `SELECT tableNo, isFixed FROM billing_DineInTable_data WHERE tableNo = (SELECT tableNo FROM billing_billWiseTableNo_data WHERE billId = '${billId}') AND billId = '${billId}'`;
+                    connection.query(sql_query_chkIsFixed, (err, chkExist) => {
+                        if (err) {
+                            console.error("Error check table is fixed or not:", err);
+                            connection.rollback(() => {
+                                connection.release();
+                                return res.status(500).send('Database Error');
+                            });
+                        } else {
+                            const isTableFixed = chkExist && chkExist.length ? chkExist[0].isFixed : true;
+                            const tableNo = chkExist && chkExist.length ? chkExist[0].tableNo : true;
+                            let sql_query_getBillInfo = `SELECT bd.billId AS billId FROM billing_data AS bd WHERE bd.billId = '${billId}' AND bd.billType = 'Dine In'`;
+                            connection.query(sql_query_getBillInfo, (err, billInfo) => {
+                                if (err) {
+                                    console.error("Error get billInfo :", err);
+                                    connection.rollback(() => {
+                                        connection.release();
+                                        return res.status(500).send('Database Error');
+                                    });
+                                } else {
+                                    if (billInfo && billInfo.length) {
+                                        let sql_query_sattledData = isTableFixed == true
+                                            ?
+                                            `UPDATE billing_DineInTable_data SET billId = null WHERE tableNo = '${tableNo}' AND billId = '${billId}';`
+                                            :
+                                            `DELETE FROM billing_DineInTable_data WHERE billId = '${billId}' AND tableNo = '${tableNo}';`;
+                                        connection.query(sql_query_sattledData, (err) => {
+                                            if (err) {
+                                                console.error("Error in sattled Data:", err);
+                                                connection.rollback(() => {
+                                                    connection.release();
+                                                    return res.status(500).send('Database Error');
+                                                });
+                                            } else {
+                                                connection.commit((err) => {
+                                                    if (err) {
+                                                        console.error("Error committing transaction:", err);
+                                                        connection.rollback(() => {
+                                                            connection.release();
+                                                            return res.status(500).send('Database Error');
+                                                        });
+                                                    } else {
+                                                        connection.release();
+                                                        req?.io?.emit('updateTableView');
+                                                        return res.status(200).send('Table Bill Cancel Success');
+                                                    }
+                                                });
+                                            }
+                                        });
+                                    } else {
+                                        connection.rollback(() => {
+                                            connection.release();
+                                            return res.status(404).send('billId Not Found...!');
+                                        })
+                                    }
+                                }
+                            })
+                        }
+                    })
+                }
+            })
+        } catch (error) {
+            console.error('An error occurred', error);
+            connection.rollback(() => {
+                connection.release();
+                return res.status(500).json('Internal Server Error');
+            })
+        }
+    })
+}
+
 module.exports = {
     addDineInOrderByApp,
     getSubTokensByBillIdForApp,
@@ -1813,5 +2264,7 @@ module.exports = {
     isTableEmpty,
     printTableBillForApp,
     findServerIpByApp,
-    getSubTokenDataByIdForApp
+    getSubTokenDataByIdForApp,
+    sattledBillDataByIDForApp,
+    sattledCancelTokenTableByApp
 }

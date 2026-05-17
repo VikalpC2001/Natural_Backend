@@ -258,8 +258,11 @@ const ddlUPI = (req, res) => {
             const branchId = decoded.id.branchId;
             const sql_query_getDetails = `SELECT
                                               onlineId,
+                                              holderName,
+                                              holderNumber,
                                               upiId,
-                                              isOfficial
+                                              isOfficial,
+                                              isDefault
                                           FROM
                                               billing_onlineUPI_data
                                           WHERE branchId = '${branchId}'`;

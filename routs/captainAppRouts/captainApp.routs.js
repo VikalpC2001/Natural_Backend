@@ -14,6 +14,8 @@ router.get('/isTableEmpty', protect, appController.isTableEmpty);
 router.get('/printTableBillForApp', protect, appController.printTableBillForApp);
 router.get('/findServerIpByApp', appController.findServerIpByApp);
 router.get('/getSubTokenDataByIdForApp', protect, appController.getSubTokenDataByIdForApp);
+router.post('/sattledBillDataByIDForApp', protect, appController.sattledBillDataByIDForApp);
+router.get('/sattledCancelTokenTableByApp', protect, appController.sattledCancelTokenTableByApp);
 
 // Item App Routs
 
